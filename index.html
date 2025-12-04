@@ -762,218 +762,255 @@ async function createModel(paramsOrVocab, maybeSettings) {
 // -----------------------------------------
 // REPLACE Trainer.trainOnDataset
 // -----------------------------------------
-async function trainOnDataset(encodedTokens, params, hooks) {
+    async function trainOnDataset(encodedTokens, params, hooks) {
   try {
-    if (!hasModel()) throw new Error("Model not created");
+    if (!hasModel()) {
+      throw new Error("Model not created");
+    }
+
     if (!Array.isArray(encodedTokens) || encodedTokens.length === 0) {
-      console.warn("No tokens to train on");
+      console.warn("trainOnDataset: no tokens");
       return;
     }
 
-    // encodedTokens is expected as an array of ints (vocab indices)
-    // model expects input shape [batch, 1] of int32 indices and targets are sparse ints [batch]
-    const indices = encodedTokens.map(x => parseInt(x, 10));
-    const N = indices.length;
+    let tokens = [];
+    for (let i = 0; i < encodedTokens.length; i++) {
+      let v = parseInt(encodedTokens[i], 10);
+      if (Number.isNaN(v)) {
+        throw new Error("Non-integer token detected at index " + i + ": " + encodedTokens[i]);
+      }
+      tokens.push(v);
+    }
 
-    // create xs as [N,1] int32 and ys as [N] int32
-    const xs = tf.tensor2d(indices.map(i => [i]), [N, 1], "int32");
-    const ys = tf.tensor1d(indices, "int32");
+    let N = tokens.length;
 
-    const batchSize = Math.max(1, Math.floor(params.batchSize || 8));
-    const epochs = Math.max(1, Math.floor(params.epochs || 1));
+    // INPUT: must be int32 for embedding
+    let xsData = [];
+    for (let i = 0; i < N; i++) {
+      xsData.push([ tokens[i] ]);
+    }
+
+    // OUTPUT: use float32 to avoid floor(int32) crash in tf.js
+    let ysData = [];
+    for (let i = 0; i < N; i++) {
+      ysData.push(tokens[i]);
+    }
+
+    let xs = tf.tensor2d(xsData, [N, 1], "int32");
+    let ys = tf.tensor1d(ysData, "float32");
+
+    let batchSize = Math.floor(params && params.batchSize ? params.batchSize : 8);
+    if (!Number.isInteger(batchSize) || batchSize <= 0) {
+      batchSize = 8;
+    }
+
+    let epochs = Math.floor(params && params.epochs ? params.epochs : 1);
+    if (!Number.isInteger(epochs) || epochs <= 0) {
+      epochs = 1;
+    }
 
     await model.fit(xs, ys, {
-      batchSize,
-      epochs,
+      batchSize: batchSize,
+      epochs: epochs,
       shuffle: true,
       callbacks: {
-        onTrainBegin: async (logs) => {
+        onTrainBegin: async function (logs) {
           console.info("Training started", logs || {});
-          if (hooks && hooks.onTrainBegin) hooks.onTrainBegin(logs);
+          if (hooks && hooks.onTrainBegin) {
+            await hooks.onTrainBegin(logs);
+          }
         },
-        onEpochEnd: async (epoch, logs) => {
-          console.info("Epoch end", epoch, logs);
-          if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs);
+        onBatchEnd: async function (batch, logs) {
+          if (hooks && hooks.onBatchEnd) {
+            await hooks.onBatchEnd(batch, logs);
+          }
         },
-        onBatchEnd: async (batch, logs) => {
-          console.debug("Batch end", batch, logs);
-          if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs);
+        onEpochEnd: async function (epoch, logs) {
+          console.info("Epoch", epoch, logs || {});
+          if (hooks && hooks.onEpochEnd) {
+            await hooks.onEpochEnd(epoch, logs);
+          }
         },
-        onTrainEnd: async (logs) => {
+        onTrainEnd: async function (logs) {
           console.info("Training finished", logs || {});
-          if (hooks && hooks.onTrainEnd) hooks.onTrainEnd(logs);
+          if (hooks && hooks.onTrainEnd) {
+            await hooks.onTrainEnd(logs);
+          }
         }
       }
     });
 
     xs.dispose();
     ys.dispose();
+
+    console.log("trainOnDataset: completed successfully");
   } catch (err) {
-    console.error("Train failed", err);
+    console.error("Train failed Error:", err);
     throw err;
   }
 }
 
-        function resetModel() {
-          try {
-            if (model) {
-              model.dispose();
-              model = null;
-              created = false;
-              lastEmbeddingMatrix = null;
-              console.info("Model disposed and reset");
-            }
-          } catch (err) {
-            console.error("resetModel error", err);
-          }
-        }
 
-        return {
-          createModel,
-          hasModel,
-          getEmbeddingMatrix,
-          trainOnDataset,
-          resetModel,
-        };
-      })();
-
-      /* ----------------------
-         Visualization helpers
-         ---------------------- */
-
-      const Visual = (function () {
-        async function extractEmbeddings(embVar) {
-          // Expects embVar to be a tf.Tensor2D of shape [vocabSize, embeddingDim]
-          try {
-            if (!embVar) throw new Error("No embedding variable provided");
-            const arr = await embVar.array();
-            return arr;
-          } catch (err) {
-            console.error("extractEmbeddings error", err);
-            return [];
-          }
-        }
-
-        async function projectPCA(embeddings, targetDim) {
-    console.group("projectPCA");
-
-    try {
-        if (!Array.isArray(embeddings) || embeddings.length === 0) {
-            throw new Error("Embeddings empty or invalid");
-        }
-
-        if (targetDim < 1) {
-            throw new Error("Invalid targetDim");
-        }
-
-        var matrix = tf.tensor2d(embeddings);
-        var mean = tf.mean(matrix, 0);
-        var centered = tf.sub(matrix, mean);
-
-        var covariance = tf.matMul(centered.transpose(), centered);
-
-        function powerIteration(mat, iterations) {
-            var b = tf.randomUniform([mat.shape[0], 1]);
-
-            for (var i = 0; i < iterations; i++) {
-                b = tf.matMul(mat, b);
-                var norm = tf.norm(b);
-                b = tf.div(b, norm);
-            }
-
-            return b;
-        }
-
-        var vectors = [];
-        var workingMatrix = covariance;
-
-        for (var d = 0; d < targetDim; d++) {
-            console.debug("Finding eigenvector", d + 1);
-
-            var v = powerIteration(workingMatrix, 60);
-            vectors.push(v);
-
-            var lambda = tf.matMul(tf.transpose(v), tf.matMul(workingMatrix, v));
-            var outer = tf.mul(v, tf.transpose(v));
-            workingMatrix = tf.sub(workingMatrix, tf.mul(lambda, outer));
-        }
-
-        var projection = tf.concat(vectors, 1);
-        var reduced = tf.matMul(centered, projection);
-
-        var result = reduced.arraySync();
-
-        console.debug("PCA result shape:", reduced.shape);
-        console.groupEnd();
-
-        return result;
-
-    } catch (error) {
-        console.error("projectPCA error", error);
-        console.groupEnd();
-        return [];
-    }
-}
-
-
-// -------------------------------------------------
-// REPLACE Visual.visualizePoints (layout -> dark)
-// -------------------------------------------------
-async function visualizePoints(points, labels, dimsRequested) {
-  try {
-    const n = points.length;
-    const d = (points[0] || []).length || 0;
-    if (n === 0) {
-      Plotly.react("plot", [{ x: [], y: [], mode: "markers" }], { margin: { t: 30 }, title: "No data" });
-      return;
+    function resetModel() {
+	    try {
+		    if (model) {
+			    model.dispose();
+			    model = null;
+			    created = false;
+			    lastEmbeddingMatrix = null;
+			    console.info("Model disposed and reset");
+		    }
+	    } catch (err) {
+		    console.error("resetModel error", err);
+	    }
     }
 
-    let plotData = [];
-    if (d >= dimsRequested && dimsRequested <= 3) {
-      if (dimsRequested === 1) {
-        const x = points.map(p => p[0]);
-        const y = points.map(() => 0);
-        plotData = [{
-          x, y, text: labels, mode: "markers+text", type: "scatter",
-          marker: { size: 10 },
-          textposition: "top center"
-        }];
-      } else if (dimsRequested === 2) {
-        plotData = [{
-          x: points.map(p => p[0]),
-          y: points.map(p => p[1]),
-          text: labels, mode: "markers+text", type: "scatter",
-          marker: { size: 10 },
-          textposition: "top center"
-        }];
-      } else {
-        plotData = [{
-          x: points.map(p => p[0]),
-          y: points.map(p => p[1]),
-          z: points.map(p => p[2]),
-          text: labels, mode: "markers", type: "scatter3d",
-          marker: { size: 4 }
-        }];
-      }
-    } else {
-      const projected = await projectPCA(points, 2);
-      plotData = [{
-        x: projected.map(p => p[0]),
-        y: projected.map(p => p[1]),
-        text: labels, mode: "markers+text", type: "scatter",
-        marker: { size: 8 },
-        textposition: "top center"
-      }];
-    }
+    return {
+	    createModel,
+	    hasModel,
+	    getEmbeddingMatrix,
+	    trainOnDataset,
+	    resetModel,
+    };
+})();
 
-    const layout = {
-      margin: { t: 30, b: 40, l: 40, r: 40 },
-      paper_bgcolor: "rgba(0,0,0,0)",
-      plot_bgcolor: "rgba(0,0,0,0)",
-      hovermode: "closest",
-      font: { color: "#e6eef6" },
-      xaxis: { gridcolor: "#2a2f45", zerolinecolor: "#444" },
-      yaxis: { gridcolor: "#2a2f45", zerolinecolor: "#444" },
+	    /* ----------------------
+	    Visualization helpers
+	    ---------------------- */
+
+		    const Visual = (function () {
+			    async function extractEmbeddings(embVar) {
+				    // Expects embVar to be a tf.Tensor2D of shape [vocabSize, embeddingDim]
+				    try {
+					    if (!embVar) throw new Error("No embedding variable provided");
+					    const arr = await embVar.array();
+					    return arr;
+				    } catch (err) {
+					    console.error("extractEmbeddings error", err);
+					    return [];
+				    }
+			    }
+
+			    async function projectPCA(embeddings, targetDim) {
+				    console.group("projectPCA");
+
+				    try {
+					    if (!Array.isArray(embeddings) || embeddings.length === 0) {
+						    throw new Error("Embeddings empty or invalid");
+					    }
+
+					    if (targetDim < 1) {
+						    throw new Error("Invalid targetDim");
+					    }
+
+					    var matrix = tf.tensor2d(embeddings);
+					    var mean = tf.mean(matrix, 0);
+					    var centered = tf.sub(matrix, mean);
+
+					    var covariance = tf.matMul(centered.transpose(), centered);
+
+					    function powerIteration(mat, iterations) {
+						    var b = tf.randomUniform([mat.shape[0], 1]);
+
+						    for (var i = 0; i < iterations; i++) {
+							    b = tf.matMul(mat, b);
+							    var norm = tf.norm(b);
+							    b = tf.div(b, norm);
+						    }
+
+						    return b;
+					    }
+
+					    var vectors = [];
+					    var workingMatrix = covariance;
+
+					    for (var d = 0; d < targetDim; d++) {
+						    console.debug("Finding eigenvector", d + 1);
+
+						    var v = powerIteration(workingMatrix, 60);
+						    vectors.push(v);
+
+						    var lambda = tf.matMul(tf.transpose(v), tf.matMul(workingMatrix, v));
+						    var outer = tf.mul(v, tf.transpose(v));
+						    workingMatrix = tf.sub(workingMatrix, tf.mul(lambda, outer));
+					    }
+
+					    var projection = tf.concat(vectors, 1);
+					    var reduced = tf.matMul(centered, projection);
+
+					    var result = reduced.arraySync();
+
+					    console.debug("PCA result shape:", reduced.shape);
+					    console.groupEnd();
+
+					    return result;
+
+				    } catch (error) {
+					    console.error("projectPCA error", error);
+					    console.groupEnd();
+					    return [];
+				    }
+			    }
+
+
+			    // -------------------------------------------------
+			    // REPLACE Visual.visualizePoints (layout -> dark)
+			    // -------------------------------------------------
+			    async function visualizePoints(points, labels, dimsRequested) {
+				    try {
+					    const n = points.length;
+					    const d = (points[0] || []).length || 0;
+					    if (n === 0) {
+						    Plotly.react("plot", [{ x: [], y: [], mode: "markers" }], { margin: { t: 30 }, title: "No data" });
+						    return;
+					    }
+
+					    let plotData = [];
+					    if (d >= dimsRequested && dimsRequested <= 3) {
+						    if (dimsRequested === 1) {
+							    const x = points.map(p => p[0]);
+							    const y = points.map(() => 0);
+							    plotData = [{
+								    x, y, text: labels, mode: "markers+text", type: "scatter",
+								    marker: { size: 10 },
+								    textposition: "top center"
+							    }];
+						    } else if (dimsRequested === 2) {
+							    plotData = [{
+								    x: points.map(p => p[0]),
+								    y: points.map(p => p[1]),
+								    text: labels, mode: "markers+text", type: "scatter",
+								    marker: { size: 10 },
+								    textposition: "top center"
+							    }];
+						    } else {
+							    plotData = [{
+								    x: points.map(p => p[0]),
+								    y: points.map(p => p[1]),
+								    z: points.map(p => p[2]),
+								    text: labels, mode: "markers", type: "scatter3d",
+								    marker: { size: 4 }
+							    }];
+						    }
+					    } else {
+						    const projected = await projectPCA(points, 2);
+						    plotData = [{
+							    x: projected.map(p => p[0]),
+							    y: projected.map(p => p[1]),
+							    text: labels, mode: "markers+text", type: "scatter",
+							    marker: { size: 8 },
+							    textposition: "top center"
+						    }];
+					    }
+
+					    const layout = {
+						    margin: { t: 30, b: 40, l: 40, r: 40 },
+						    paper_bgcolor: "rgba(0,0,0,0)",
+						    plot_bgcolor: "rgba(0,0,0,0)",
+						    hovermode: "closest",
+						    font: { color: "#e6eef6" },
+						    xaxis: { gridcolor: "#2a2f45", zerolinecolor: "#444" },
+yaxis: { gridcolor: "#2a2f45", zerolinecolor: "#444" },
       scene: { bgcolor: "rgba(0,0,0,0)" }
     };
 
