@@ -244,6 +244,190 @@
   <script>
     "use strict";
     ; // FIX: Semikolon hinzugefügt, um den 'Uncaught SyntaxError' zu beheben, der auftritt, wenn eine IIFE direkt nach der 'use strict' Direktive ohne Semikolon folgt.
+
+    function isSymmetric(A, tolerance = 1e-6) {
+	    // Überprüft, ob die tf.Tensor2D A symmetrisch ist (A = A^T) innerhalb einer gewissen Toleranz.
+	    // Da Matrizen in TensorFlow.js Tensoren sind, müssen wir die tf.js-Operationen nutzen.
+
+	    if (A.rank !== 2 || A.shape[0] !== A.shape[1]) {
+		    // Symmetrie ist nur für quadratische Matrizen definiert.
+		    return false;
+	    }
+
+	    let A_T = null;
+	    let diff = null;
+	    let maxAbsDiff = null;
+
+	    try {
+		    // 1. Transponierte Matrix A^T berechnen
+		    A_T = A.transpose();
+
+		    // 2. Differenz D = A - A^T berechnen
+		    diff = A.sub(A_T);
+
+		    // 3. Maximale absolute Differenz finden: max(|D|)
+		    // Wenn max(|A - A^T|) nahe Null ist (innerhalb der Toleranz), ist die Matrix symmetrisch.
+		    maxAbsDiff = tf.max(tf.abs(diff)).dataSync()[0];
+
+		    return maxAbsDiff <= tolerance;
+
+	    } catch (e) {
+		    console.error("Fehler bei der Überprüfung der Symmetrie:", e);
+		    return false; // Bei Fehler wird angenommen, dass sie nicht symmetrisch ist
+	    } finally {
+		    // Speichermanagement: Alle temporären Tensoren entsorgen
+		    if (A_T) A_T.dispose();
+		    if (diff) diff.dispose();
+	    }
+    }
+
+    function eigh(A) {
+	    // Eigendecomposition (Eigenwertzerlegung) für eine symmetrische Matrix A (Kovarianzmatrix).
+	    // Dies ist eine Näherungslösung unter Verwendung der Power Iteration mit Deflation.
+	    // Es ist numerisch nicht so stabil oder effizient wie professionelle Implementierungen
+	    // (z. B. Jacobi oder QR-Algorithmus), sollte aber für kleinere Matrizen funktionieren.
+
+	    if (!isSymmetric(A) || A.shape[0] !== A.shape[1]) {
+		    throw new Error("eigh: Die Eingabematrix muss symmetrisch und quadratisch sein.");
+	    }
+
+	    const N = A.shape[0];
+	    const MAX_ITERATIONS = 100; // Anzahl der Iterationen für die Power Iteration
+	    const TOLERANCE = 1e-6;     // Konvergenztoleranz
+
+	    const eigenvalues = [];
+	    const eigenvectors = [];
+
+	    let currentA = A.clone(); // Klonen der Matrix, um sie zu deflatieren
+
+	    for (let k = 0; k < N; k++) {
+		    // ----------------------------------------------------
+		    // 1. Power Iteration: Finde den dominanten Eigenvektor/-wert
+		    // ----------------------------------------------------
+		    let vk = tf.randomNormal([N, 1]); // Start mit einem zufälligen Vektor
+		    let lambda = 0;
+
+		    // Normalisieren des Startvektors
+		    vk = vk.div(vk.norm());
+
+		    for (let i = 0; i < MAX_ITERATIONS; i++) {
+			    const Avk = currentA.matMul(vk);
+			    const Avk_norm = Avk.norm();
+			    const vk_new = Avk.div(Avk_norm); // Der neue Vektor vk+1
+
+			    // Schätzung des Eigenwerts (Rayleigh Quotient): lambda = (vk^T * A * vk) / (vk^T * vk)
+			    // Da vk normalisiert ist (vk^T * vk = 1), ist es: lambda = vk^T * A * vk
+			    const vk_T = vk_new.transpose();
+			    const lambda_new_tensor = vk_T.matMul(currentA).matMul(vk_new);
+			    const lambda_new = lambda_new_tensor.dataSync()[0];
+
+			    const diff = Math.abs(lambda_new - lambda);
+
+			    // Entsorgung temporärer Tensoren
+			    Avk.dispose();
+			    vk_T.dispose();
+			    lambda_new_tensor.dispose();
+			    vk.dispose(); // Entsorgen des alten vk
+
+			    vk = vk_new; // Den neuen Vektor für die nächste Iteration setzen
+			    lambda = lambda_new;
+
+			    if (diff < TOLERANCE) {
+				    break; // Konvergenz erreicht
+			    }
+		    }
+
+		    // Speichern des gefundenen Eigenwertpaares
+		    eigenvalues.push(lambda);
+		    eigenvectors.push(vk.transpose()); // Speichern als Zeilenvektor für späteres Stacking
+
+		    // ----------------------------------------------------
+		    // 2. Deflation: Entfernen des Eigenwerts/-vektors aus der Matrix
+		    // ----------------------------------------------------
+		    // Deflationierte Matrix A' = A - lambda * v * v^T
+		    // v*v^T ist die Projektionsmatrix des Vektors v
+
+		    if (k < N - 1) { // Nicht deflatieren, wenn es die letzte Iteration ist
+			    const v_vT = vk.matMul(vk.transpose()); // v * v^T (N x N Matrix)
+			    const lambda_v_vT = v_vT.mul(lambda); // lambda * v * v^T
+
+			    const nextA = currentA.sub(lambda_v_vT);
+
+			    // Entsorgung
+			    currentA.dispose(); // Entsorgen der alten deflatierten Matrix
+			    v_vT.dispose();
+			    lambda_v_vT.dispose();
+
+			    currentA = nextA; // Die nächste deflatierte Matrix
+		    } else {
+			    currentA.dispose(); // Die letzte Matrix entsorgen
+		    }
+
+		    // Den letzten gefundenen Vektor für die nächste Iteration entsorgen
+		    vk.dispose();
+	    }
+
+	    // ----------------------------------------------------
+	    // 3. Ergebnisse zusammenfassen und sortieren
+	    // ----------------------------------------------------
+
+	    // Die Eigenvektoren der Power Iteration sind in der Reihenfolge von größtem zu kleinstem Eigenwert.
+	    // Sortiere die Ergebnisse basierend auf den Eigenwerten (absteigend)
+	    const sortedPairs = eigenvalues.map((val, idx) => ({
+		    value: val,
+		    vector: eigenvectors[idx]
+	    })).sort((a, b) => b.value - a.value); // Absteigende Sortierung (größter zuerst)
+
+	    const finalEigenvalues = tf.tensor1d(sortedPairs.map(p => p.value));
+
+	    // Alle Eigenvektor-Zeilen zu einer Matrix stapeln (N x N)
+	    const finalEigenvectors = tf.concat(sortedPairs.map(p => p.vector), 0).transpose(); // Transponiert zu N x N
+
+	    // Entsorgung der temporären Tensoren (denn tf.concat klont)
+	    eigenvectors.forEach(t => t.dispose());
+
+	    return { eigenvalues: finalEigenvalues, eigenvectors: finalEigenvectors };
+    }
+
+    function svd(centered) {
+        let cov = null;
+        let eig = null;
+
+        try {
+          // Das mathematische Äquivalent zur SVD(X) für PCA ist die Eigendecomposition
+          // der Kovarianzmatrix C = X^T * X / (N - 1). Die Eigenvektoren von C sind
+          // die Hauptkomponenten (Principal Components).
+
+          // 1. Kovarianzmatrix C berechnen: X^T * X / (N - 1)
+          const N = centered.shape[0]; // Anzahl der Stichproben
+          // cov = centered.transpose() * centered
+          cov = centered.transpose().matMul(centered).div(N - 1 || 1);
+
+          // 2. Eigenwertzerlegung durchführen: [Eigenwerte, Eigenvektoren]
+          // eigh ist für symmetrische Matrizen (wie cov) ausgelegt.
+          eig = eigh(cov);
+
+          // Die Eigenvektoren (eig.eigenvectors) sind die Hauptkomponenten.
+          // Die ursprüngliche PCA-Funktion erwartete V (rechte singuläre Vektoren)
+          // als Hauptkomponenten, was hier den Eigenvektoren entspricht.
+          const v = eig.eigenvectors;
+
+          // U ist für die nachfolgende PCA-Projektion (centered.matMul(v)) nicht notwendig
+          // und wird sofort entsorgt. Wir geben einen Dummy-Tensor zurück, um das
+          // Destructuring { u, v } in projectPCA zu erfüllen.
+          const u = tf.zeros([centered.shape[0], centered.shape[1]]);
+
+          // Temporäre Tensoren entsorgen
+          eig.eigenvalues.dispose();
+          cov.dispose();
+
+          return { u, v };
+        } catch(e) {
+          console.error("Custom svd (via Eigen-decomposition) failed.", e);
+          throw e; // Weiterleiten an den äußeren catch-Block in projectPCA
+        }
+      }
+
     (function () {
       // Utilities
       const $ = s => document.querySelector(s);
@@ -477,8 +661,8 @@
             centered = tf.sub(matrix, mean);
             
             // 2. Perform SVD on the centered data to get principal components
-            // CRITICAL FIX: Use tf.linalg.svd, as tf.svd is often not exposed globally.
-            const { u, v } = tf.linalg.svd(centered);
+            // CRITICAL FIX: Use svd, as tf.svd is often not exposed globally.
+            const { u, v } = svd(centered);
             
             // 3. Select the top k principal components (V columns)
             const k_safe = Math.min(k, originalDims);
@@ -1163,13 +1347,13 @@
           return Math.abs(corr.z[0][0] - 1) < 1e-6 && Math.abs(corr.z[1][1] - 1) < 1e-6;
         });
         await runTest("z_projectPCA_2D", async () => {
-           // CRITICAL FIX: projectPCA uses tf.linalg.svd
+           // CRITICAL FIX: projectPCA uses svd
            const points = [[10, 1], [11, 2], [12, 3]];
            const p = await Visual.projectPCA(points, 2);
            return Array.isArray(p) && p.length === 3 && p[0].length === 2;
         });
         await runTest("z_projectPCA_1D_skip", async () => {
-           // CRITICAL FIX: projectPCA uses tf.linalg.svd
+           // CRITICAL FIX: projectPCA uses svd
            const points = [[1], [2], [3]];
            const p = await Visual.projectPCA(points, 2);
            return Array.isArray(p) && p.length === 3 && p[0].length === 1; // Should return original 1D data
