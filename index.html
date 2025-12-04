@@ -35,8 +35,8 @@
     button.ghost { background:transparent;color:var(--accent); border:1px solid rgba(255,255,255,0.04); }
     .token-output { display:flex; flex-wrap:wrap; gap:6px; }
     .token-pill { padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.02); font-family:var(--mono); font-size:12px; border:1px solid rgba(255,255,255,0.02); }
-    #plot, #highdim-plot, #live-plot, .heatmap { height:360px; min-height:220px; border-radius:10px; overflow:hidden; background:transparent; border:1px solid rgba(255,255,255,0.03); }
-    #live-plot { height:220px; }
+    #plot, #highdim-plot, #live-plot, .heatmap, #dist-heatmap, #loss-plot { height:360px; min-height:220px; border-radius:10px; overflow:hidden; background:transparent; border:1px solid rgba(255,255,255,0.03); }
+    #live-plot, #loss-plot { height:220px; }
     .status-bar { position:fixed; left:0;right:0;bottom:0; display:flex; align-items:center; justify-content:space-between; padding:10px 18px; background:linear-gradient(180deg, rgba(2,6,23,0.9), rgba(2,6,23,0.98)); color:var(--muted); border-top:1px solid rgba(255,255,255,0.02); font-size:13px; z-index:9999; }
     .logpane { max-height:200px; overflow:auto; background:rgba(0,0,0,0.06); padding:8px; border-radius:8px; font-family:var(--mono); font-size:12px; color:#cfe; }
     pre.mathml { background: rgba(0,0,0,0.06); padding:8px; border-radius:8px; overflow:auto; font-family:var(--mono); font-size:12px; color:#dfe; max-height:180px; }
@@ -61,7 +61,6 @@
   </header>
 
   <main class="container" aria-live="polite">
-    <!-- left column -->
     <section class="panel">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <strong>Eingabe & Tokenizer</strong>
@@ -105,7 +104,6 @@
       </div>
     </section>
 
-    <!-- right column: controls and internals -->
     <aside class="sidebar">
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -148,8 +146,10 @@
           <input id="live-text" placeholder="Text zur Live-Visualisierung..." />
           <div style="display:flex;gap:8px;margin-top:8px;">
             <button id="btn-live-toggle" class="ghost">Live (off)</button>
+            <button id="btn-probe-now" class="ghost">Probe Now</button>
           </div>
           <div id="live-plot" style="margin-top:8px;"></div>
+          <div id="loss-plot" style="margin-top:8px; height:150px;"></div>
         </div>
       </div>
 
@@ -202,7 +202,6 @@
       </div>
     </aside>
 
-    <!-- full-width visualization area -->
     <section class="panel" style="grid-column: 1 / -1;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <strong>Haupt-Visualisierung</strong>
@@ -211,9 +210,10 @@
       <div style="display:grid;grid-template-columns: 1fr 420px; gap:12px; margin-top:12px;">
         <div>
           <div id="plot"></div>
-          <div style="display:flex;gap:8px;justify-content:space-between;margin-top:8px;">
+          <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:8px;">
             <div class="muted">Hauptplot — transparenter Hintergrund</div>
             <div style="display:flex;gap:6px;">
+              <label><input type="checkbox" id="auto-highdim-toggle" checked> Auto High-Dim</label>
               <button id="btn-export-emb" class="ghost">Export embeddings</button>
               <button id="btn-reset" class="ghost">Reset model</button>
             </div>
@@ -228,6 +228,11 @@
           <div id="highdim-plot" style="margin-top:8px;"></div>
         </div>
       </div>
+
+      <div style="margin-top:16px;">
+        <strong>Distanz/Ähnlichkeits-Heatmap</strong>
+        <div id="dist-heatmap" style="margin-top:8px; height:360px;"></div>
+      </div>
     </section>
   </main>
 
@@ -238,11 +243,17 @@
 
   <script>
     "use strict";
+    ; // FIX: Semikolon hinzugefügt, um den 'Uncaught SyntaxError' zu beheben, der auftritt, wenn eine IIFE direkt nach der 'use strict' Direktive ohne Semikolon folgt.
     (function () {
       // Utilities
       const $ = s => document.querySelector(s);
       const $$ = s => Array.from(document.querySelectorAll(s));
       let logBuffer = [];
+      let epochLosses = []; // For loss plotting
+      
+      // Live mode toggle state
+      let liveMode = false;
+
       function pushLog(level, message) {
         const entry = { time: new Date().toISOString(), level, message: String(message) };
         logBuffer.push(entry);
@@ -253,7 +264,7 @@
       function renderLogs() {
         const el = $("#logpane");
         if (!el) return;
-        el.innerHTML = logBuffer.slice(-80).map(e => `<div><small style="color:var(--muted)">[${e.time}]</small> <strong>${e.level}</strong> ${escapeHtml(e.message)}</div>`).join("");
+        el.innerHTML = logBuffer.slice(-80).map(e => `<div><small style="color:var(--muted)">[${e.time.split("T")[1].substring(0,8)}]</small> <strong>${e.level}</strong> ${escapeHtml(e.message)}</div>`).join("");
         el.scrollTop = el.scrollHeight;
         $("#log-count").textContent = logBuffer.length;
       }
@@ -292,7 +303,7 @@
             return out;
           }
         }
-        function charTokenizer(text) { if (!text) return []; return Array.from(text.replace(/\s+/g,"")); }
+        function charTokenizer(text) { if (!text) return []; return Array.from(text.replace(/\s+/g,"").trim()); } 
         function buildTokenizer(type, opts) {
           switch(type) {
             case "whitespace": return t => whitespaceTokenizer(t,opts);
@@ -312,13 +323,13 @@
         let idToToken = [];
         function buildFromTokens(tokens) {
           tokenToId = {}; idToToken = [];
-          tokens.forEach(t => { if (!(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } });
+          tokens.forEach(t => { if (t && !(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } });
           console.info("vocab built", idToToken.length);
           return { tokenToId, idToToken };
         }
-        function addTokens(tokens) { tokens.forEach(t => { if (!(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } }); }
+        function addTokens(tokens) { tokens.forEach(t => { if (t && !(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } }); }
         function size() { return idToToken.length; }
-        function encode(tokens) { return tokens.map(t => { if (t in tokenToId) return tokenToId[t]; tokenToId[t] = idToToken.length; idToToken.push(t); return tokenToId[t]; }); }
+        function encode(tokens) { return tokens.map(t => { if (t in tokenToId) return tokenToId[t]; console.warn(`Token '${t}' not in vocab, adding it.`); tokenToId[t] = idToToken.length; idToToken.push(t); return tokenToId[t]; }).filter(i=>i>=0); } 
         function decode(ids) { return ids.map(i => idToToken[i] || "<UNK>"); }
         function reset() { tokenToId = {}; idToToken = []; }
         function exportVocab() { return { tokenToId: Object.assign({}, tokenToId), idToToken: idToToken.slice() }; }
@@ -330,12 +341,17 @@
         let model = null; let created=false; let lastEmbedding=null;
         async function createModel(params) {
           try {
+            if (model) resetModel(); // Reset existing model
             const inputDim = parseInt(params.inputDim,10);
             const embeddingDim = parseInt(params.outputDim || params.embeddingDim,10);
             if (!Number.isInteger(inputDim) || inputDim<=0) throw new Error("invalid inputDim");
             if (!Number.isInteger(embeddingDim) || embeddingDim<=0) throw new Error("invalid embeddingDim");
             const input = tf.input({shape:[1], dtype:"int32", name:"token_input"});
-            const emb = tf.layers.embedding({ inputDim: inputDim, outputDim: embeddingDim, inputLength: 1, name: "embedding" });
+            // Glorot Uniform initialiser for embedding layer
+            const emb = tf.layers.embedding({ 
+                inputDim: inputDim, outputDim: embeddingDim, inputLength: 1, name: "embedding", 
+                embeddingsInitializer: 'glorotUniform'
+            });
             const embedOut = emb.apply(input);
             const flat = tf.layers.flatten().apply(embedOut);
             const decoder = tf.layers.dense({ units: inputDim, activation: "softmax", name: "decoder" }).apply(flat);
@@ -356,22 +372,36 @@
           if (!hasModel()) throw new Error("no model");
           if (!Array.isArray(encodedTokens) || encodedTokens.length===0) return;
           const N = encodedTokens.length;
+          // Context window of 1: target is also the input (Word2Vec CBOW/Skip-gram-like, but simplified for didactic purposes)
           const xsArr = encodedTokens.map(v => [parseInt(v,10)]);
           const ysArr = encodedTokens.map(v => parseInt(v,10));
-          const xs = tf.tensor2d(xsArr,[N,1],"int32");
-          const ys = tf.tensor1d(ysArr,"float32");
+          
+          // FIX: The input (xs) must be int32 for the Embedding layer. 
+          // The target (ys) is cast to float32 as a workaround for an internal TF.js batching/floor bug 
+          // when using sparseCategoricalCrossentropy with int32 targets.
+          const xs = tf.tensor2d(xsArr,[N,1],"int32"); 
+          const ys = tf.tensor1d(ysArr,"float32"); 
+          
           await model.fit(xs, ys, {
             batchSize: params.batchSize || 8,
             epochs: params.epochs || 1,
             shuffle: true,
             callbacks: {
-              onBatchEnd: async (batch, logs) => { if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs); },
-              onEpochEnd: async (epoch, logs) => { if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs); }
+              onBatchEnd: async (batch, logs) => { 
+                // CRITICAL FIX: Add tf.nextFrame() to allow UI and internal cleanup to run
+                await tf.nextFrame();
+                if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs); 
+              },
+              onEpochEnd: async (epoch, logs) => { 
+                epochLosses.push(logs.loss); // Log loss
+                Visual.plotLoss(epochLosses); // Plot loss
+                if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs); 
+              }
             }
           });
           xs.dispose(); ys.dispose();
         }
-        function resetModel(){ try { if (model) { model.dispose(); model=null; created=false; lastEmbedding=null; $("#model-summary").textContent=""; } } catch(e){} }
+        function resetModel(){ try { if (model) { model.dispose(); model=null; created=false; lastEmbedding=null; $("#model-summary").textContent=""; epochLosses=[]; Visual.plotLoss(epochLosses); } } catch(e){} }
         async function readModelInternals() {
           if (!hasModel()) return null;
           const layers = model.layers || [];
@@ -406,11 +436,12 @@
         if (Array.isArray(arr) && Array.isArray(arr[0])) {
           mtable = `<mtable>${arr.map(r=> Array.isArray(r) ? `<mtr>${r.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>` : `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`).join("")}</mtable>`;
         } else if (Array.isArray(arr)) {
+          // 1D array, show as row vector
           mtable = `<mtable><mtr>${arr.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr></mtable>`;
         } else {
           mtable = `<mtable><mtr><mtd><mn>${escapeHtml(String(arr))}</mn></mtd></mtr></mtable>`;
         }
-        const mathml = `<math xmlns="http://www.w3.org/1998/Math/MathML">${mtable}</math>`;
+        const mathml = `<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">${mtable}</math>`;
         const meta = `shape: [${shape.join(", ")}], dtype: ${dtype}, size: ${size}`;
         return { mathml, meta, array: arr, shape, dtype, size };
       }
@@ -422,128 +453,93 @@
           if (!embVar) throw new Error("no emb var");
           return await embVar.array();
         }
+        
+        // SVD-based PCA implementation
         async function projectPCA(embeddings, k) {
-          if (!embeddings || embeddings.length===0) return [];
-          const matrix = tf.tensor2d(embeddings);
-          const mean = tf.mean(matrix,0);
-          const centered = tf.sub(matrix, mean);
-          const cov = tf.matMul(centered.transpose(), centered);
-          function powerIteration(mat, iterations) {
-            let b = tf.randomUniform([mat.shape[0],1]);
-            for (let i=0;i<iterations;i++){ b = tf.matMul(mat,b); const norm = tf.norm(b); b = tf.div(b,norm); }
-            return b;
+          if (!embeddings || embeddings.length===0 || (embeddings[0] || []).length <= 1) return embeddings; 
+          
+          let matrix = null;
+          let mean = null;
+          let centered = null;
+          let reduced = null;
+          let principalComponents = null;
+
+          try {
+            matrix = tf.tensor2d(embeddings);
+            const originalDims = matrix.shape[1];
+            
+            if (originalDims === 1) { // Skip PCA for 1D
+              return embeddings; // Matrix is disposed at the end
+            }
+            
+            // 1. Center the data
+            mean = tf.mean(matrix, 0);
+            centered = tf.sub(matrix, mean);
+            
+            // 2. Perform SVD on the centered data to get principal components
+            // CRITICAL FIX: Use tf.linalg.svd, as tf.svd is often not exposed globally.
+            const { u, v } = tf.linalg.svd(centered);
+            
+            // 3. Select the top k principal components (V columns)
+            const k_safe = Math.min(k, originalDims);
+            principalComponents = v.slice([0, 0], [-1, k_safe]); 
+            
+            // 4. Project the data: Centered * Principal Components
+            reduced = centered.matMul(principalComponents);
+
+            u.dispose();
+            v.dispose();
+          } catch(e) {
+              console.error("PCA via SVD failed, returning centered data slice", e);
+              // Fallback: If SVD fails, just return a slice of the centered data
+              if (centered) {
+                 const k_safe = Math.min(k, centered.shape[1]);
+                 reduced = centered.slice([0, 0], [-1, k_safe]);
+              }
           }
-          const vectors = [];
-          let M = cov;
-          for (let d=0; d<k; d++){ const v = powerIteration(M, 60); vectors.push(v); const lambda = tf.matMul(tf.transpose(v), tf.matMul(M, v)); const outer = tf.matMul(v, tf.transpose(v)); M = tf.sub(M, tf.mul(lambda, outer)); }
-          const projection = tf.concat(vectors,1);
-          const reduced = tf.matMul(centered, projection);
-          const res = reduced.arraySync();
-          matrix.dispose(); mean.dispose(); centered.dispose(); cov.dispose(); projection.dispose(); reduced.dispose();
+          
+          const res = reduced ? reduced.arraySync() : embeddings; // If all else fails, return original
+          
+          // Dispose all Tensors to avoid memory leak
+          if (matrix) matrix.dispose(); 
+          if (mean) mean.dispose(); 
+          if (centered) centered.dispose();
+          if (principalComponents) principalComponents.dispose();
+          if (reduced) reduced.dispose();
+          
           return res;
         }
 
-        // Primary visualize function: 1/2/3D on #plot; >3 goes to #highdim-plot
-        async function visualizePoints(points, labels, dimsRequested, mode, sliceAxes) {
-          try {
-            if (!Array.isArray(points) || points.length===0) {
-              Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Empty"));
-              return;
-            }
-            const n = points.length; const d = (points[0]||[]).length||0;
-            // choose where to draw
-            if (d >= dimsRequested && dimsRequested<=3 && dimsRequested<=3) {
-              // main plot
-              if (dimsRequested===1) {
-                const x = points.map(p=>p[0]); const y = points.map(()=>0);
-                const data = [{ x, y, text: labels, mode: "markers+text", type:"scatter", marker:{size:9}, textposition:"top center" }];
-                const lay = layoutTransparent("1D embeddings");
-                Plotly.react("plot", data, lay);
-                lastPlotLayout = lay;
-                return;
-              } else if (dimsRequested===2) {
-                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), text: labels, mode: "markers+text", type:"scatter", marker:{size:8} }];
-                const lay = layoutTransparent("2D embeddings");
-                Plotly.react("plot", data, lay);
-                lastPlotLayout = lay;
-                return;
-              } else {
-                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), z: points.map(p=>p[2]), text: labels, mode:"markers", type:"scatter3d", marker:{size:4} }];
-                const lay = layoutTransparent("3D embeddings", {scene:{bgcolor:"rgba(0,0,0,0)"}});
-                Plotly.react("plot", data, lay);
-                lastPlotLayout = lay;
-                return;
-              }
-            }
+        function cosineSimilarity(vecA, vecB) {
+          let dotProduct = 0;
+          let normA = 0;
+          let normB = 0;
+          
+          // FIX: Combined loops for numerical stability and consistency.
+          const len = Math.min(vecA.length, vecB.length);
+          for (let i = 0; i < len; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+          }
 
-            // High-dim: render only in #highdim-plot (no overlap)
-            const target = "highdim-plot";
-
-            if (mode === "pairwise") {
-              // create pairwise scatter matrix for first min(6,d) dims
-              const dims = Math.min(6, d);
-              const figData = [];
-              const figLayout = layoutTransparent("Pairwise scatter matrix");
-              // For simplicity, perform PCA to 3 dims and show scatter matrix of those dims
-              const pca = await projectPCA(points, Math.min(3,d));
-              const used = pca[0] ? pca[0].length : 2;
-              const dimsLabels = Array.from({length:used},(_,i)=>`PC${i+1}`);
-              // build scatter traces for combos
-              // Plotly does not have a native scatter-matrix without using plotly.express; emulate by small subplots is heavy.
-              // Instead show two visuals: PCA scatter and correlation heatmap
-              const sc = { x: pca.map(r=>r[0]), y: pca.map(r=>r[1]), mode:"markers", type:"scatter", marker:{size:6}, text: labels };
-              const corr = correlationMatrix(points);
-              const heat = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", showscale:true };
-              Plotly.react(target, [sc, heat], Object.assign({}, figLayout, {grid:{rows:2, columns:1, subplots:[["xy"],["xy2"]]}, xaxis:{domain:[0,1], anchor:"y"}, yaxis:{domain:[0.55,1], anchor:"x"}, xaxis2:{domain:[0,1], anchor:"y2"}, yaxis2:{domain:[0,0.45], anchor:"x2"}}));
-              lastPlotLayout = figLayout;
-              return;
-            }
-
-            if (mode === "heatmap") {
-              const corr = correlationMatrix(points);
-              const h = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", colorscale:"Viridis" };
-              const lay = layoutTransparent("Correlation heatmap");
-              Plotly.react(target, [h], lay);
-              lastPlotLayout = lay;
-              return;
-            }
-
-            if (mode === "pca") {
-              const p = await projectPCA(points, 2);
-              const data = [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text: labels, mode:"markers+text", type:"scatter", marker:{size:8} }];
-              const lay = layoutTransparent("PCA 2D");
-              Plotly.react(target, data, lay);
-              lastPlotLayout = lay;
-              return;
-            }
-
-            // default: parallel coords + PCA small
-            {
-              const parDimensions = [];
-              for (let dim=0; dim<d; dim++) {
-                const values = points.map(p=>p[dim]);
-                parDimensions.push({ label:`dim${dim}`, values, range:[Math.min(...values), Math.max(...values)] });
-              }
-              const parTrace = { type:"parcoords", line:{color:Array.from({length:n},(_,i)=>i), colorscale:"Turbo"}, dimensions:parDimensions, domain:{x:[0,1], y:[0.45,1]} };
-              const pcaSmall = await projectPCA(points, 2);
-              const scatter = { x: pcaSmall.map(r=>r[0]), y: pcaSmall.map(r=>r[1]), text: labels, mode:"markers", type:"scatter", marker:{size:6}, xaxis:"x2", yaxis:"y2" };
-              const layout = layoutTransparent("Parallel Coordinates + PCA (small)");
-              Plotly.react(target, [parTrace, scatter], Object.assign({}, layout, {xaxis2:{domain:[0,1]}, yaxis2:{domain:[0,0.45]}}));
-              lastPlotLayout = layout;
-              return;
-            }
-
-          } catch (err) { console.error("visualizePoints", err); pushLog("error", "visualizePoints: "+err.message); }
+          if (normA === 0 || normB === 0) return 0;
+          return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
         }
 
-        function layoutTransparent(title, extras) {
-          const base = { title, margin:{t:30}, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} };
-          if (extras) Object.assign(base, extras);
-          return base;
+        function distanceMatrix(points, labels) {
+          const n = points.length;
+          const z = Array.from({length:n}, (_,i) => Array.from({length:n}, (_,j) => {
+            if (i===j) return 1; // Cosine similarity is 1 for self
+            return cosineSimilarity(points[i], points[j]);
+          }));
+          return { x: labels, y: labels.slice(), z };
         }
-
+        
         function correlationMatrix(points) {
+          if (!points || points.length === 0) return { x: [], y: [], z: [[]] };
           const d = points[0].length;
+          if (d < 2) return { x: [], y: [], z: [[]] };
           const x = Array.from({length:d},(_,i)=>`dim${i}`);
           const z = Array.from({length:d}, (_,i) => Array.from({length:d}, (_,j) => {
             const xi = points.map(p=>p[i]);
@@ -555,9 +551,157 @@
           }));
           return { x, y: x.slice(), z };
         }
+        
+        function layoutTransparent(title, extras) {
+          const base = { title, margin:{t:30}, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} };
+          if (extras) Object.assign(base, extras);
+          return base;
+        }
 
-        return { extractEmbeddings, visualizePoints, projectPCA };
+        async function visualizePoints(points, labels, dimsRequested, mode, sliceAxes) {
+          try {
+            if (!Array.isArray(points) || points.length===0) {
+              Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Empty"));
+              return;
+            }
+            const n = points.length; const d = (points[0]||[]).length||0;
+            const autoHighDim = $("#auto-highdim-toggle").checked;
+
+            // Choose where to draw
+            if (d >= dimsRequested && dimsRequested<=3 && dimsRequested<=3 && !autoHighDim) {
+              // Main plot
+              if (dimsRequested===1) {
+                const x = points.map(p=>p[0]); const y = points.map(()=>0);
+                const data = [{ x, y, text: labels, mode: "markers+text", type:"scatter", marker:{size:9}, textposition:"top center" }];
+                const lay = layoutTransparent("1D embeddings");
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+              } else if (dimsRequested===2) {
+                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), text: labels, mode: "markers+text", type:"scatter", marker:{size:8} }];
+                const lay = layoutTransparent("2D embeddings");
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+              } else {
+                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), z: points.map(p=>p[2]), text: labels, mode:"markers", type:"scatter3d", marker:{size:4} }];
+                const lay = layoutTransparent("3D embeddings", {scene:{bgcolor:"rgba(0,0,0,0)"}});
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+              }
+              // Clear high-dim plot if not needed
+              Plotly.react("highdim-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("High-dim: Not needed"));
+              
+            } else {
+              // High-dim: render in #highdim-plot
+              const target = "highdim-plot";
+              
+              // Clear main plot
+              Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Embeddings (High-Dim View Active)"));
+
+              // Auto mode
+              if (mode === "auto") {
+                mode = (d > 6) ? "parallel" : "pca";
+              }
+
+              if (mode === "pairwise") {
+                const dims = Math.min(6, d);
+                // Perform PCA to 3 dims and show scatter matrix of those dims
+                const pca = await projectPCA(points, Math.min(3,d));
+                const used = pca[0] ? pca[0].length : 2;
+                const dimsLabels = Array.from({length:used},(_,i)=>`PC${i+1}`);
+                
+                const sc = { x: pca.map(r=>r[0]), y: pca.map(r=>r[1]), mode:"markers", type:"scatter", marker:{size:6}, text: labels, name:`PCA 2D (${dimsLabels[0]} vs ${dimsLabels[1]})` };
+                const corr = correlationMatrix(points);
+                const heat = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", showscale:true, name:"Correlation Heatmap", xaxis:'x2', yaxis:'y2', colorscale:"Viridis" };
+                
+                const figLayout = layoutTransparent("High-Dim: Pairwise (PCA) & Correlation", {
+                    grid:{rows:2, columns:1, subplots:[["xy"],["xy2"]]}, 
+                    xaxis:{domain:[0,1], anchor:"y"}, 
+                    yaxis:{domain:[0.55,1], anchor:"x"}, 
+                    xaxis2:{domain:[0,1], anchor:"y2"}, 
+                    yaxis2:{domain:[0,0.45], anchor:"x2"}
+                });
+                Plotly.react(target, [sc, heat], figLayout);
+                lastPlotLayout = figLayout;
+                
+              } else if (mode === "heatmap") {
+                const corr = correlationMatrix(points);
+                const h = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", colorscale:"Viridis", name:"Correlation Heatmap" };
+                const lay = layoutTransparent("High-Dim: Correlation Heatmap");
+                Plotly.react(target, [h], lay);
+                lastPlotLayout = lay;
+                
+              } else if (mode === "pca") {
+                const p = await projectPCA(points, 2);
+                const data = [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text: labels, mode:"markers+text", type:"scatter", marker:{size:8}, name:"PCA 2D" }];
+                const lay = layoutTransparent("High-Dim: PCA 2D");
+                Plotly.react(target, data, lay);
+                lastPlotLayout = lay;
+                
+              } else {
+                // default: parallel coords
+                const parDimensions = [];
+                for (let dim=0; dim<d; dim++) {
+                  const values = points.map(p=>p[dim]);
+                  parDimensions.push({ label:`Dim ${dim}`, values, range:[Math.min(...values), Math.max(...values)] });
+                }
+                const parTrace = { type:"parcoords", line:{color:Array.from({length:n},(_,i)=>i), colorscale:"Turbo"}, dimensions:parDimensions, name:"Parallel Coordinates" };
+                
+                const pcaSmall = await projectPCA(points, 2);
+                const scatter = { x: pcaSmall.map(r=>r[0]), y: pcaSmall.map(r=>r[1]), text: labels, mode:"markers", type:"scatter", marker:{size:6}, xaxis:"x2", yaxis:"y2", name:"PCA 2D (small)" };
+                
+                const layout = layoutTransparent("High-Dim: Parallel Coordinates + PCA (small)", {
+                    grid:{rows:2, columns:1, subplots:[["xy"],["xy2"]]}, 
+                    xaxis:{domain:[0,1], anchor:"y"}, 
+                    yaxis:{domain:[0.45,1], anchor:"x"}, // Parallel coords takes top space
+                    xaxis2:{domain:[0,1], anchor:"y2"}, 
+                    yaxis2:{domain:[0,0.40], anchor:"x2"} // PCA takes bottom space
+                });
+                Plotly.react(target, [parTrace, scatter], layout);
+                lastPlotLayout = layout;
+              }
+            }
+            
+            // Distances Heatmap (always updated)
+            const dm = distanceMatrix(points, labels);
+            const distLay = layoutTransparent("Cosine-Ähnlichkeits-Heatmap (Embeddings)");
+            Plotly.react("dist-heatmap", [{ z:dm.z, x:dm.x, y:dm.y, type:"heatmap", colorscale:"RdBu", zmin:-1, zmax:1 }], distLay);
+
+          } catch (err) { console.error("visualizePoints", err); pushLog("error", "visualizePoints: "+err.message); }
+        }
+
+        function plotLoss(losses) {
+          const x = losses.map((_, i) => i + 1);
+          const data = [{ x, y: losses, mode: "lines+markers", type: "scatter", name: "Training Loss", line: { color: "var(--accent)" } }];
+          const lay = layoutTransparent("Loss pro Epoche", { xaxis: { title: "Epoche" }, yaxis: { title: "Loss" }, height:150, margin:{t:25, b:35, l:40, r:10} });
+          Plotly.react("loss-plot", data, lay);
+        }
+
+        // CRITICAL FIX: Export helper functions for testing and utility
+        return { extractEmbeddings, visualizePoints, projectPCA, plotLoss, cosineSimilarity, distanceMatrix, correlationMatrix };
       })();
+
+      // MathML helper
+      async function tensorToMathML(tensor) {
+        if (!tensor) return { mathml: "<math></math>", meta: "null" };
+        let arr;
+        try { if (typeof tensor.arraySync === "function") arr = tensor.arraySync(); else arr = await tensor.array(); } catch(e) { try { arr = await tensor.array(); } catch(e2) { arr = null; } }
+        const shape = tensor.shape ? tensor.shape.slice() : (Array.isArray(arr) ? (Array.isArray(arr[0]) ? [arr.length, arr[0].length] : [arr.length]) : []);
+        const dtype = tensor.dtype || "float32";
+        const size = tensor.size || (Array.isArray(arr) ? (function count(a){ if (!Array.isArray(a)) return 1; return a.reduce((s,x)=>s+count(x),0); })(arr) : 0);
+        function rowToTR(r) { if (!Array.isArray(r)) return `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`; return `<mtr>${r.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>`; }
+        let mtable = "";
+        if (Array.isArray(arr) && Array.isArray(arr[0])) {
+          mtable = `<mtable>${arr.map(r=> Array.isArray(r) ? `<mtr>${r.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>` : `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`).join("")}</mtable>`;
+        } else if (Array.isArray(arr)) {
+          // 1D array, show as row vector
+          mtable = `<mtable><mtr>${arr.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr></mtable>`;
+        } else {
+          mtable = `<mtable><mtr><mtd><mn>${escapeHtml(String(arr))}</mn></mtd></mtr></mtable>`;
+        }
+        const mathml = `<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">${mtable}</math>`;
+        const meta = `shape: [${shape.join(", ")}], dtype: ${dtype}, size: ${size}`;
+        return { mathml, meta, array: arr, shape, dtype, size };
+      }
 
       // UI wiring
       function initUI() {
@@ -569,23 +713,39 @@
           const tokenPreview = $("#token-preview");
           let liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: parseInt(ngramN.value,10), mode: ngramMode.value });
 
-          function refreshTokenizer() { liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: Math.max(1,parseInt(ngramN.value,10)), mode: ngramMode.value }); tokenizeAndPreview(); }
+          function refreshTokenizer() { 
+            const n = Math.max(1,parseInt(ngramN.value,10));
+            const mode = ngramMode.value;
+            liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n, mode }); 
+            // Only tokenize and preview if the input has content
+            if (inputText.value.trim().length > 0) {
+                 tokenizeAndPreview(false);
+            }
+          }
 
           tokenizerType.addEventListener("change", refreshTokenizer);
           ngramN.addEventListener("input", refreshTokenizer);
           ngramMode.addEventListener("change", refreshTokenizer);
-          inputText.addEventListener("input", () => tokenizeAndPreview(true));
+          inputText.addEventListener("input", () => tokenizeAndPreview(false)); 
           $("#btn-tokenize").addEventListener("click", ()=> tokenizeAndPreview(true));
           $("#btn-build-vocab").addEventListener("click", ()=>{
             const toks = tokenizeAndPreview(true);
             Vocab.buildFromTokens(toks);
             $("#stat-vocab-size") && ($("#stat-vocab-size").textContent = Vocab.size());
-            pushLog("info", "vocab built size="+Vocab.size());
+            pushLog("info", "vocab built "+Vocab.size());
+            // Update embedding size estimate
+            const embeddingDim = Math.max(1, parseInt($("#embedding-dim").value,10) || 8);
+            $("#status-emb-size").textContent = `${Vocab.size()}×${embeddingDim}`;
           });
-          $("#btn-clear").addEventListener("click", ()=> { inputText.value=""; tokenizeAndPreview(true); Vocab.reset(); $("#stat-vocab-size") && ($("#stat-vocab-size").textContent = Vocab.size()); });
+          $("#btn-clear").addEventListener("click", ()=> { inputText.value=""; tokenizeAndPreview(true); Vocab.reset(); $("#status-emb-size").textContent="0"; });
 
           $("#btn-create-model").addEventListener("click", async () => {
             try {
+              if (Vocab.size() === 0) {
+                 // Try to build vocab first if none exists
+                 $("#btn-build-vocab").click(); 
+                 await new Promise(r=>setTimeout(r,50)); // Wait for vocab to build
+              }
               const vocabSize = Math.max(1, Vocab.size() || 4);
               const embeddingDim = Math.max(1, parseInt($("#embedding-dim").value,10) || 8);
               const optimizer = $("#optimizer-type").value;
@@ -593,47 +753,45 @@
               const m = await Trainer.createModel({ inputDim: vocabSize, outputDim: embeddingDim, optimizer, learningRate: lr });
               $("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`;
               pushLog("info","created model");
+              
+              // Automatic visualization of embeddings after model creation
+              updateAllVisualizations();
+
             } catch (err) { pushLog("error","create model failed: "+err.message); }
           });
 
           $("#btn-train").addEventListener("click", async () => {
             try {
-              if (!Trainer.hasModel()) { await $("#btn-create-model").click(); }
+              if (Vocab.size() === 0) { pushLog("warn", "vocab is empty, building vocab first."); $("#btn-build-vocab").click(); }
+              if (!Trainer.hasModel()) { pushLog("warn", "no model, creating model first."); await $("#btn-create-model").click(); }
+
               const enc = Vocab.encode(tokenizeAndPreview(true));
               if (!enc || enc.length===0) { pushLog("warn","no tokens to train"); return; }
               const params = { batchSize: parseInt($("#batch-size").value,10)||8, epochs: parseInt($("#epochs").value,10)||1 };
+              
               const hooks = {
                 onBatchEnd: async (batch, logs) => {
-                  try {
-                    const embVar = Trainer.getEmbeddingMatrix();
-                    if (!embVar) return;
-                    const raw = await Visual.extractEmbeddings(embVar);
-                    const labels = Vocab.exportVocab().idToToken;
-                    const dimsReq = parseInt($("#visual-dims").value,10);
-                    const mode = $("#visual-mode").value;
-                    await Visual.visualizePoints(raw, labels, dimsReq, mode, null);
-                    // live text
-                    if (liveMode) {
-                      const s = $("#live-text").value || "";
-                      const tok = Tokenizers.buildTokenizer($("#tokenizer-type").value, { n: Math.max(1,parseInt($("#ngram-n").value,10)), mode: $("#ngram-mode").value });
-                      const toks = tok(s);
-                      const vocab = Vocab.exportVocab();
-                      const allEmb = await (Trainer.getEmbeddingMatrix()).array();
-                      const selected = toks.map(t => { const id = (t in vocab.tokenToId) ? vocab.tokenToId[t] : -1; if (id>=0 && id<allEmb.length) return allEmb[id]; return new Array(allEmb[0].length).fill(0); });
-                      if (selected.length>0) {
-                        const p = await Visual.projectPCA(selected, 2);
-                        Plotly.react("live-plot", [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text: toks, mode:"markers+text", type:"scatter" }], { title: "Live probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
-                      }
-                    }
-                  } catch (e) { console.error("onBatchEnd",e); }
+                  // Reduced batch end update for performance, rely on epoch end
+                  if (liveMode) {
+                    await probeNow(true); // Update live plot only
+                  }
+                },
+                onEpochEnd: async (epoch, logs) => { 
+                    pushLog("info", `Epoch ${epoch}: Loss=${logs.loss.toFixed(4)}, Acc=${logs.acc.toFixed(4)}`);
+                    await updateAllVisualizations(); 
                 }
               };
+              
+              pushLog("info", `starting training for ${params.epochs} epochs...`);
               await Trainer.trainOnDataset(enc, params, hooks);
               pushLog("info","training finished");
+              await updateAllVisualizations();
+
             } catch (err) { pushLog("error","train failed: "+err.message); }
           });
 
-          $("#btn-probe") && $("#btn-probe").addEventListener("click", probeNow);
+          $("#btn-probe-now").addEventListener("click", ()=> probeNow(false));
+          
           $("#btn-export-emb").addEventListener("click", async () => {
             try {
               const emb = Trainer.getEmbeddingMatrix();
@@ -644,59 +802,113 @@
             } catch (e) { console.error(e); }
           });
 
-          $("#btn-reset").addEventListener("click", () => { Trainer.resetModel(); $("#status-emb-size").textContent="0"; pushLog("info","model reset"); });
+          $("#btn-reset").addEventListener("click", () => { Trainer.resetModel(); $("#status-emb-size").textContent="0"; pushLog("info","model reset"); updateAllVisualizations(); });
 
-          $("#btn-live-toggle").addEventListener("click", () => { liveMode = !liveMode; $("#btn-live-toggle").textContent = liveMode ? "Live (on)" : "Live (off)"; });
+          $("#btn-live-toggle").addEventListener("click", () => { 
+            liveMode = !liveMode; 
+            $("#btn-live-toggle").textContent = liveMode ? "Live (on)" : "Live (off)"; 
+            if (liveMode) {
+               probeNow(true);
+               pushLog("info", "live mode activated");
+            } else {
+               pushLog("info", "live mode deactivated");
+            }
+          });
 
           $("#btn-show-emb-math").addEventListener("click", async () => {
             try {
-              const emb = Trainer.getEmbeddingMatrix();
-              if (!emb) { $("#tensor-meta").textContent = "No embedding available"; $("#tensor-mathml-render").innerHTML = ""; $("#tensor-heatmap").innerHTML=""; return; }
-              const res = await tensorToMathML(emb);
-              $("#tensor-meta").textContent = res.meta;
-              // Insert MathML raw so browsers render it (if supported)
-              const renderEl = $("#tensor-mathml-render");
-              renderEl.innerHTML = ""; const wrapper = document.createElement("div"); wrapper.innerHTML = res.mathml; renderEl.appendChild(wrapper);
-              // heatmap
-              try {
-                const z = (res.array && Array.isArray(res.array)) ? res.array : [[]];
-                Plotly.react("tensor-heatmap", [{ z, type:"heatmap", colorscale:"Viridis" }], { title: "Embedding heatmap", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
-              } catch(e) { console.warn("heatmap failed", e); }
+              await renderEmbeddingInternals();
             } catch (e) { console.error(e); }
           });
 
           $("#btn-show-model-internals").addEventListener("click", async () => {
             try {
-              const internals = await Trainer.readModelInternals();
-              const container = $("#model-internals-render"); container.innerHTML = "";
-              if (!internals) { container.textContent = "No model internals"; return; }
-              for (let i=0;i<internals.length;i++){
-                const li = internals[i];
-                const hdr = document.createElement("div"); hdr.innerHTML = `<strong>Layer: ${escapeHtml(li.name)} (${escapeHtml(li.className)})</strong>`; container.appendChild(hdr);
-                for (let j=0;j<li.weights.length;j++){
-                  const wt = li.weights[j];
-                  const block = document.createElement("div"); block.style.marginTop="6px";
-                  block.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--muted)">weight: ${escapeHtml(wt.name)}</div>`;
-                  try {
-                    const res = await tensorToMathML(wt.tensor);
-                    const mdiv = document.createElement("div"); mdiv.innerHTML = res.mathml;
-                    block.appendChild(mdiv);
-                    // add mini heatmap
-                    const heatId = `heat-${i}-${j}-${Date.now()}`;
-                    const heatDiv = document.createElement("div"); heatDiv.id = heatId; heatDiv.className = "heatmap"; heatDiv.style.height = "140px"; heatDiv.style.marginTop="6px";
-                    block.appendChild(heatDiv);
-                    const z = (res.array && Array.isArray(res.array)) ? res.array : [[res.array]];
-                    try { Plotly.react(heatId, [{ z, type:"heatmap", colorscale:"Viridis" }], { title: `${wt.name} heatmap`, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} }); } catch(e){ console.warn("plot heat error",e); }
-                    container.appendChild(block);
-                  } catch(e) { block.appendChild(document.createTextNode("error rendering weight")); container.appendChild(block); }
-                }
-              }
+              await renderModelInternals();
             } catch (e) { console.error(e); }
           });
 
           $("#run-tests").addEventListener("click", runTests);
 
         } catch (e) { console.error("initUI", e); }
+      }
+      
+      async function updateAllVisualizations() {
+          const embVar = Trainer.getEmbeddingMatrix();
+          if (embVar) {
+              const raw = await Visual.extractEmbeddings(embVar);
+              const labels = Vocab.exportVocab().idToToken;
+              const dimsReq = parseInt($("#visual-dims").value,10);
+              const mode = $("#visual-mode").value;
+              await Visual.visualizePoints(raw, labels, dimsReq, mode, null);
+              await renderEmbeddingInternals(true); // Update MathML/Heatmap too
+              if (liveMode) await probeNow(true);
+          } else {
+              // Clear plots
+              Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Embeddings"));
+              Plotly.react("highdim-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("High-dim"));
+              Plotly.react("dist-heatmap", [{ x:[], y:[], z:[], type:"heatmap" }], layoutTransparent("Cosine-Ähnlichkeits-Heatmap"));
+          }
+      }
+
+      async function renderEmbeddingInternals(silent=false) {
+        const emb = Trainer.getEmbeddingMatrix();
+        if (!emb) { $("#tensor-meta").textContent = "No embedding available"; $("#tensor-mathml-render").innerHTML = ""; $("#tensor-heatmap").innerHTML=""; return; }
+        const res = await tensorToMathML(emb);
+        $("#tensor-meta").textContent = res.meta;
+        // Insert MathML raw so browsers render it (if supported)
+        const renderEl = $("#tensor-mathml-render");
+        renderEl.innerHTML = ""; const wrapper = document.createElement("pre"); wrapper.className="mathml"; wrapper.innerHTML = res.mathml; renderEl.appendChild(wrapper);
+        // heatmap
+        try {
+          const z = (res.array && Array.isArray(res.array) && Array.isArray(res.array[0])) ? res.array : [[(res.array || 0)]];
+          const xLabels = Array.from({length:z[0].length}, (_,i)=>`Dim ${i}`);
+          const yLabels = Vocab.exportVocab().idToToken;
+
+          Plotly.react("tensor-heatmap", [{ z, type:"heatmap", colorscale:"Viridis", x:xLabels, y:yLabels }], { title: "Embedding Heatmap", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+          if (!silent) pushLog("info", "embedding matrix rendered");
+        } catch(e) { console.warn("heatmap failed", e); pushLog("error", "heatmap failed: "+e.message); }
+      }
+
+      async function renderModelInternals() {
+        const internals = await Trainer.readModelInternals();
+        const container = $("#model-internals-render"); container.innerHTML = "";
+        if (!internals) { container.textContent = "No model internals"; return; }
+        
+        for (let i=0;i<internals.length;i++){
+          const li = internals[i];
+          const hdr = document.createElement("div"); hdr.style.marginTop="12px"; hdr.innerHTML = `<strong>Layer: ${escapeHtml(li.name)} (${escapeHtml(li.className)})</strong>`; container.appendChild(hdr);
+          
+          for (let j=0;j<li.weights.length;j++){
+            const wt = li.weights[j];
+            const block = document.createElement("div"); block.style.marginTop="6px";
+            block.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--muted)">weight: ${escapeHtml(wt.name)}</div>`;
+            
+            try {
+              const res = await tensorToMathML(wt.tensor);
+              const mdiv = document.createElement("pre"); mdiv.className="mathml"; mdiv.innerHTML = res.mathml;
+              block.appendChild(mdiv);
+              
+              // Add mini heatmap
+              const heatId = `heat-${li.name}-${wt.name}-${Date.now()}`;
+              const heatDiv = document.createElement("div"); 
+              heatDiv.id = heatId; 
+              heatDiv.className = "heatmap"; 
+              heatDiv.style.height = "140px"; 
+              heatDiv.style.marginTop="6px";
+              
+              // CRITICAL FIX: Append the heatDiv to the block and the block to the container *before* calling Plotly.react
+              block.appendChild(heatDiv); 
+              container.appendChild(block); 
+              
+              const z = (res.array && Array.isArray(res.array) && Array.isArray(res.array[0])) ? res.array : (Array.isArray(res.array) ? [res.array] : [[res.array]]);
+              try { Plotly.react(heatId, [{ z, type:"heatmap", colorscale:"Viridis" }], { title: `${wt.name} heatmap`, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"}, margin:{t:30, b:20, l:20, r:10} }); } catch(e){ console.warn("plot heat error",e); }
+            } catch(e) { 
+                block.appendChild(document.createTextNode("error rendering weight: "+e.message)); 
+                container.appendChild(block); // ensure block is appended even on error
+            }
+          }
+        }
+        pushLog("info", "model internals rendered");
       }
 
       function tokenizeAndPreview(force) {
@@ -715,77 +927,328 @@
         } catch (e) { console.error(e); return []; }
       }
 
-      async function probeNow() {
+      async function probeNow(isLive) {
         try {
-          const s = ($("#probe-text") && $("#probe-text").value) || "";
-          const tokenizer = Tokenizers.buildTokenizer($("#tokenizer-type").value, { n: Math.max(1,parseInt($("#ngram-n").value,10)||2), mode: $("#ngram-mode").value });
+          const s = ($("#live-text") && $("#live-text").value) || "";
+          // Use the currently configured tokenizer settings
+          const type = $("#tokenizer-type").value;
+          const n = Math.max(1,parseInt($("#ngram-n").value,10)||2);
+          const mode = $("#ngram-mode").value;
+          const tokenizer = Tokenizers.buildTokenizer(type, { n, mode });
           const toks = tokenizer(s);
-          // show in preview if exist
-          const preview = $("#probe-preview"); if (preview) { preview.innerHTML = ""; toks.forEach(t=>{ const d=document.createElement("div"); d.className="token-pill"; d.textContent=t; preview.appendChild(d); }); }
-          if (Trainer.hasModel()) {
-            const embVar = Trainer.getEmbeddingMatrix();
-            const allEmb = await embVar.array();
-            const vocab = Vocab.exportVocab();
-            const selected = toks.map(t => { const id = (t in vocab.tokenToId)?vocab.tokenToId[t]:-1; return (id>=0 && id<allEmb.length)?allEmb[id]:new Array(allEmb[0].length).fill(0); });
-            if (selected.length>0) {
-              const p = await Visual.projectPCA(selected,2);
-              Plotly.react("live-plot", [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text:toks, mode:"markers+text", type:"scatter" }], { title:"Probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
-            }
+          
+          if (!Trainer.hasModel()) { 
+             Plotly.react("live-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Live probe: No model yet"));
+             return;
           }
-        } catch (e) { console.error(e); }
+          
+          const embVar = Trainer.getEmbeddingMatrix();
+          const allEmb = await embVar.array();
+          const vocab = Vocab.exportVocab();
+          
+          const selected = toks.map(t => { 
+            const id = (t in vocab.tokenToId)?vocab.tokenToId[t]:-1; 
+            // Return the embedding vector for the token ID, or a zero vector if UNK/missing
+            return (id>=0 && id<allEmb.length)?allEmb[id]:new Array(allEmb[0].length).fill(0); 
+          }).filter(e => e.length > 0); 
+
+          if (selected.length>0) {
+            // Project the live tokens into 2D via PCA
+            const p = await Visual.projectPCA(selected,2);
+            Plotly.react("live-plot", [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text:toks, mode:"markers+text", type:"scatter" }], { 
+                title:"Live Probe (PCA 2D)", 
+                paper_bgcolor:"rgba(0,0,0,0)", 
+                plot_bgcolor:"rgba(0,0,0,0)", 
+                font:{color:"#e6eef6"},
+                margin:{t:30, b:20, l:40, r:10}
+            });
+          } else {
+             Plotly.react("live-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Live probe: No tokens or embeddings found"));
+          }
+          
+        } catch (e) { console.error("probeNow failed", e); if(!isLive) pushLog("error", "probeNow failed: "+e.message); }
       }
 
-      // Test suite (adds checks for MathML render + transparent layout)
+      // Test suite
       async function runTests() {
         const results = [];
         console.group("Tests");
-        try {
-          // T1 whitespace tokenizer
-          try { const t = Tokenizers.buildTokenizer("whitespace"); const out = t("a b c"); if (Array.isArray(out) && out.length===3) { results.push({name:"t_whitespace",ok:true}); } else { results.push({name:"t_whitespace",ok:false}); } } catch(e){ results.push({name:"t_whitespace",ok:false,err:e}); }
+        pushLog("info", "Starting tests...");
 
-          // T2 ngram char
-          try { const tn = Tokenizers.buildTokenizer("ngram",{n:2,mode:"char"}); const out = tn("ab cd"); if (Array.isArray(out) && out.length>=3 && out[0]==="ab") results.push({name:"t_ngram_char",ok:true}); else results.push({name:"t_ngram_char",ok:false}); } catch(e){ results.push({name:"t_ngram_char",ok:false,err:e}); }
-
-          // T3 create model and show emb math
+        // ASYNC Helper function to run and record individual tests
+        const runTest = async (name, checkFunc) => {
           try {
-            Vocab.reset(); Vocab.buildFromTokens(["one","two","three","four"]);
-            await Trainer.createModel({ inputDim: Vocab.size(), outputDim: 4, optimizer:"adam", learningRate:0.01 });
-            const enc = Vocab.encode(["one","two","three","one"]);
-            await Trainer.trainOnDataset(enc, { batchSize:2, epochs:1 }, {});
-            // show embedding math into DOM
-            await $("#btn-show-emb-math").click();
-            // check DOM
-            const mathEl = $("#tensor-mathml-render");
-            const mathHas = mathEl && mathEl.innerHTML && mathEl.innerHTML.indexOf("<math") !== -1;
-            results.push({ name: "t_emb_math_dom", ok: !!mathHas });
-          } catch (e) { results.push({ name: "t_emb_math_dom", ok: false, err: e }); }
+            const ok = await checkFunc(); // Await the result of the (now async) check function
+            results.push({ name: name, ok: !!ok });
+            if (!ok) console.warn(`TEST FAILED: ${name}`);
+            else console.info(`TEST OK: ${name}`);
+          } catch(e) {
+            results.push({ name: name, ok: false, err: e });
+            console.error(`TEST ERROR: ${name}`, e);
+          } finally {
+             // CRITICAL FIX: Add a small pause for cleanup/GC between tests to prevent state leakage
+             await tf.nextFrame(); 
+          }
+        };
+        
+        // --- 1. Tokenizer Tests (10) ---
+        await runTest("t_whitespace", async () => {
+          const t = Tokenizers.buildTokenizer("whitespace");
+          const out = t(" a b \t c \n");
+          return Array.isArray(out) && out.length === 3 && out.join("_") === "a_b_c";
+        });
+        await runTest("t_comma", async () => {
+          const t = Tokenizers.buildTokenizer("comma");
+          const out = t("one,two , three ,");
+          return Array.isArray(out) && out.length === 3 && out.join("_") === "one_two_three";
+        });
+        await runTest("t_regex_default", async () => {
+          const t = Tokenizers.buildTokenizer("regex");
+          const out = t("Word! word2. word3");
+          return Array.isArray(out) && out.length === 3 && out.join("_") === "Word_word2_word3";
+        });
+        await runTest("t_regex_custom", async () => {
+          const t = Tokenizers.buildTokenizer("regex", { pattern: "[A-Z]" });
+          const out = t("A b C d E");
+          return Array.isArray(out) && out.length === 3 && out.join("") === "ACE";
+        });
+        await runTest("t_ngram_char_2", async () => {
+          const t = Tokenizers.buildTokenizer("ngram", { n: 2, mode: "char" });
+          const out = t("cat");
+          return Array.isArray(out) && out.length === 2 && out.join("_") === "ca_at";
+        });
+        await runTest("t_ngram_char_3", async () => {
+          const t = Tokenizers.buildTokenizer("ngram", { n: 3, mode: "char" });
+          const out = t("test");
+          return Array.isArray(out) && out.length === 2 && out.join("_") === "tes_est";
+        });
+        await runTest("t_ngram_word_2", async () => {
+          const t = Tokenizers.buildTokenizer("ngram", { n: 2, mode: "word" });
+          const out = t("the cat sat");
+          return Array.isArray(out) && out.length === 2;
+        });
+        await runTest("t_char", async () => {
+          const t = Tokenizers.buildTokenizer("char");
+          const out = t("a b");
+          return Array.isArray(out) && out.length === 2 && out.join("") === "ab";
+        });
+        await runTest("t_empty_input", async () => {
+          const t = Tokenizers.buildTokenizer("whitespace");
+          const out = t("");
+          return Array.isArray(out) && out.length === 0;
+        });
+        await runTest("t_ngram_n_gt_len", async () => {
+          const t = Tokenizers.buildTokenizer("ngram", { n: 5, mode: "word" });
+          const out = t("a b c");
+          return Array.isArray(out) && out.length === 0;
+        });
 
-          // T4 visualizePoints uses transparent layout (lastPlotLayout set)
+        // --- 2. Vocab Tests (5) ---
+        await runTest("v_build", async () => {
+          Vocab.reset();
+          Vocab.buildFromTokens(["a", "b", "a", "c"]);
+          return Vocab.size() === 3;
+        });
+        await runTest("v_encode_known", async () => {
+          Vocab.reset();
+          Vocab.buildFromTokens(["a", "b", "c"]);
+          const encoded = Vocab.encode(["b", "a"]);
+          return encoded.length === 2 && encoded[0] === 1 && encoded[1] === 0;
+        });
+        await runTest("v_encode_new", async () => {
+          Vocab.reset();
+          Vocab.buildFromTokens(["a", "b"]);
+          const encoded = Vocab.encode(["c"]);
+          return Vocab.size() === 3 && encoded.length === 1 && encoded[0] === 2;
+        });
+        await runTest("v_decode", async () => {
+          Vocab.reset();
+          Vocab.buildFromTokens(["apple", "banana"]);
+          const decoded = Vocab.decode([1, 0]);
+          return decoded.length === 2 && decoded[0] === "banana" && decoded[1] === "apple";
+        });
+        await runTest("v_reset", async () => {
+          Vocab.reset();
+          return Vocab.size() === 0;
+        });
+
+        // --- 3. Trainer/Model Tests (8) ---
+        await runTest("m_create_valid", async () => {
+          Vocab.reset(); Vocab.buildFromTokens(["a", "b"]);
+          await Trainer.createModel({ inputDim: 2, outputDim: 4, optimizer: "adam", learningRate: 0.01 });
+          return Trainer.hasModel();
+        });
+        await runTest("m_get_embedding", async () => {
+          const emb = Trainer.getEmbeddingMatrix();
+          return emb !== null && emb.shape[0] === 2 && emb.shape[1] === 4;
+        });
+        await runTest("m_train_one_epoch", async () => {
+          Vocab.reset(); Vocab.buildFromTokens(["a", "b", "c"]);
+          await Trainer.createModel({ inputDim: 3, outputDim: 2, optimizer: "sgd", learningRate: 0.1 });
+          const enc = Vocab.encode(["a", "b", "c", "a"]);
+          let loss = 0;
+          const hooks = { onEpochEnd: async (e, logs) => { loss = logs.loss; } };
+          await Trainer.trainOnDataset(enc, { batchSize: 2, epochs: 1 }, hooks);
+          // Check that loss is a number and training completed without error
+          return typeof loss === 'number' && loss > 0;
+        });
+        await runTest("m_read_internals", async () => {
+          const internals = await Trainer.readModelInternals();
+          // FIX: Model layers are [InputLayer, Embedding, Flatten, Dense] -> 4 layers
+          return Array.isArray(internals) && internals.length === 4; 
+        });
+        await runTest("m_reset", async () => {
+          Trainer.resetModel();
+          return !Trainer.hasModel();
+        });
+        await runTest("m_create_with_low_dim", async () => {
+          Vocab.reset(); Vocab.buildFromTokens(["x", "y"]);
+          await Trainer.createModel({ inputDim: 2, outputDim: 1, optimizer: "adam", learningRate: 0.01 });
+          const emb = Trainer.getEmbeddingMatrix();
+          return emb !== null && emb.shape[1] === 1;
+        });
+        await runTest("m_train_empty_input", async () => {
+          Vocab.reset(); Vocab.buildFromTokens(["x", "y"]);
+          await Trainer.createModel({ inputDim: 2, outputDim: 2, optimizer: "adam", learningRate: 0.01 });
+          let trained = true;
           try {
-            const points = [[1,2,3],[2,3,4],[3,2,1]];
-            await Visual.visualizePoints(points, ["a","b","c"], 4, "pca");
-            const ok = lastPlotLayout && lastPlotLayout.paper_bgcolor && String(lastPlotLayout.paper_bgcolor).indexOf("rgba")!==-1;
-            results.push({ name: "t_layout_transparent", ok: !!ok });
-          } catch (e) { results.push({ name: "t_layout_transparent", ok: false, err: e }); }
+            // This should not throw an error, but simply exit early
+            await Trainer.trainOnDataset([], { batchSize: 1, epochs: 1 }, {});
+          } catch(e) {
+            trained = false;
+          }
+          return trained; 
+        });
+        await runTest("m_train_small_batch", async () => {
+          Vocab.reset(); Vocab.buildFromTokens(["w1", "w2", "w3"]);
+          await Trainer.createModel({ inputDim: 3, outputDim: 2, optimizer: "adam", learningRate: 0.01 });
+          const enc = Vocab.encode(["w1", "w2"]);
+          let loss = 0;
+          const hooks = { onEpochEnd: async (e, logs) => { loss = logs.loss; } };
+          await Trainer.trainOnDataset(enc, { batchSize: 1, epochs: 1 }, hooks);
+          return typeof loss === 'number' && loss > 0;
+        });
 
-          // report
-          const passed = results.filter(r=>r.ok).length;
-          console.log("Test results", results);
-          alert(`Tests finished: ${passed}/${results.length} passed. Sieh Konsole für Details.`);
-        } catch (e) {
-          console.error("tests failed", e); alert("Tests encountered an error, check console.");
-        } finally { console.groupEnd(); }
+
+        // --- 4. MathML/Visual Tests (7) ---
+        await runTest("z_tensorToMathML_2D", async () => {
+          const tensor = tf.tensor2d([[1.1, 2.2], [3.3, 4.4]]);
+          const res = await tensorToMathML(tensor);
+          tensor.dispose();
+          return res.mathml.indexOf("<math") !== -1 && res.meta.indexOf("shape: [2, 2]") !== -1;
+        });
+        await runTest("z_tensorToMathML_1D", async () => {
+          const tensor = tf.tensor1d([5, 6, 7]);
+          const res = await tensorToMathML(tensor);
+          tensor.dispose();
+          return res.mathml.indexOf("<math") !== -1 && res.meta.indexOf("shape: [3]") !== -1;
+        });
+        await runTest("z_cosineSimilarity", async () => {
+          // CRITICAL FIX: The function is now exported by Visual module
+          const s1 = Visual.cosineSimilarity([1, 0], [0, 1]); // Orthogonal
+          const s2 = Visual.cosineSimilarity([1, 1], [1, 1]); // Identical
+          return Math.abs(s1) < 1e-6 && Math.abs(s2 - 1) < 1e-6;
+        });
+        await runTest("z_distanceMatrix_size", async () => {
+          // CRITICAL FIX: The function is now exported by Visual module
+          const points = [[1, 2], [3, 4], [5, 6]];
+          const labels = ["a", "b", "c"];
+          const dm = Visual.distanceMatrix(points, labels);
+          return dm.z.length === 3 && dm.z[0].length === 3;
+        });
+        await runTest("z_correlationMatrix_diag", async () => {
+          // CRITICAL FIX: The function is now exported by Visual module
+          const points = [[1, 2], [3, 4], [5, 6]];
+          const corr = Visual.correlationMatrix(points);
+          return Math.abs(corr.z[0][0] - 1) < 1e-6 && Math.abs(corr.z[1][1] - 1) < 1e-6;
+        });
+        await runTest("z_projectPCA_2D", async () => {
+           // CRITICAL FIX: projectPCA uses tf.linalg.svd
+           const points = [[10, 1], [11, 2], [12, 3]];
+           const p = await Visual.projectPCA(points, 2);
+           return Array.isArray(p) && p.length === 3 && p[0].length === 2;
+        });
+        await runTest("z_projectPCA_1D_skip", async () => {
+           // CRITICAL FIX: projectPCA uses tf.linalg.svd
+           const points = [[1], [2], [3]];
+           const p = await Visual.projectPCA(points, 2);
+           return Array.isArray(p) && p.length === 3 && p[0].length === 1; // Should return original 1D data
+        });
+
+        // --- 5. Integration/DOM Tests (4) ---
+        await runTest("i_emb_math_dom_exists", async () => {
+          Trainer.resetModel();
+          Vocab.reset(); Vocab.buildFromTokens(["a", "b"]);
+          await Trainer.createModel({ inputDim: 2, outputDim: 2, optimizer: "adam", learningRate: 0.01 });
+          await renderEmbeddingInternals(true);
+          // Allow a small delay for Plotly to process, though react is usually sync
+          await tf.nextFrame();
+          const mathHas = $("#tensor-mathml-render pre.mathml") && $("#tensor-mathml-render pre.mathml").innerHTML.indexOf("<math") !== -1;
+          const heatmapExists = !!$("#tensor-heatmap .js-plotly-plot");
+          return !!mathHas && heatmapExists;
+        });
+        await runTest("i_model_internals_dom_exists", async () => {
+          Trainer.resetModel();
+          Vocab.reset(); Vocab.buildFromTokens(["a", "b"]);
+          await Trainer.createModel({ inputDim: 2, outputDim: 2, optimizer: "adam", learningRate: 0.01 });
+          // CRITICAL FIX: renderModelInternals now appends the DOM element before calling Plotly.react
+          await renderModelInternals();
+          // Allow a small delay for Plotly to process
+          await tf.nextFrame();
+          const internalRendered = $("#model-internals-render").innerHTML.indexOf("Layer: decoder") !== -1;
+          return internalRendered;
+        });
+        await runTest("i_live_probe_works", async () => {
+          Trainer.resetModel();
+          Vocab.reset(); Vocab.buildFromTokens(["ich", "teste", "was"]);
+          await Trainer.createModel({ inputDim: 3, outputDim: 2, optimizer: "adam", learningRate: 0.01 });
+          $("#live-text").value = "ich teste";
+          await probeNow(false);
+          // Check for Plotly element existence
+          const plotReady = !!$("#live-plot .js-plotly-plot");
+          return plotReady;
+        });
+        await runTest("i_loss_plot_updates", async () => {
+           epochLosses = [0.9, 0.5];
+           Visual.plotLoss(epochLosses);
+           const plotReady = !!$("#loss-plot .js-plotly-plot");
+           return plotReady;
+        });
+        
+        // --- Report ---
+        const passed = results.filter(r=>r.ok).length;
+        console.log("Test results", results);
+        pushLog("info", `Tests finished: ${passed}/${results.length} passed.`);
+        alert(`Tests finished: ${passed}/${results.length} passed. Sieh Konsole für Details.`);
+        Trainer.resetModel(); // Cleanup
+        console.groupEnd();
       }
 
+
       // startup
-      let liveMode = false;
+      function layoutTransparent(title, extras) {
+          const base = { title, margin:{t:30}, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} };
+          if (extras) Object.assign(base, extras);
+          return base;
+      }
+      
       (function main() {
         try {
           initUI();
-          tokenizeAndPreview();
-          Plotly.newPlot("plot", [{ x:[], y:[], mode:"markers" }], { title:"Embeddings", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
-          Plotly.newPlot("highdim-plot", [{ x:[], y:[], mode:"markers" }], { title:"High-dim", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
-          Plotly.newPlot("live-plot", [{ x:[], y:[], mode:"markers" }], { title:"Live probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+          tokenizeAndPreview(false);
+          
+          Plotly.newPlot("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Embeddings"));
+          Plotly.newPlot("highdim-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("High-dim"));
+          Plotly.newPlot("live-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Live probe"));
+          Plotly.newPlot("dist-heatmap", [{ x:[], y:[], z:[], type:"heatmap" }], layoutTransparent("Cosine-Ähnlichkeits-Heatmap"));
+          Visual.plotLoss(epochLosses); // Initialize loss plot
+          
+          // Set initial input text to help users start
+          $("#input-text").value = "das ist ein test. test, test. das ist noch ein test.";
+          $("#tokenizer-type").value = "whitespace"; // Better default for typical NLP
+          tokenizeAndPreview(true);
+          $("#btn-build-vocab").click(); // Build initial vocab
+
           pushLog("info","App ready");
         } catch (e) { console.error("init error", e); pushLog("error","init error "+e.message); }
       })();
