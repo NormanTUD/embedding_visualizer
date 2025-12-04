@@ -1,0 +1,1253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interactive Tokenizer → Embedding Trainer</title>
+
+  <!-- load local libraries from current folder as requested -->
+  <script src="./tf.min.js"></script>
+  <script src="./plotly.latest.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f1724;
+      --panel: #0b1220;
+      --muted: #9aa4b2;
+      --accent: #5eead4;
+      --accent-2: #60a5fa;
+      --danger: #fb7185;
+      --glass: rgba(255,255,255,0.03);
+      --card-shadow: 0 8px 24px rgba(2,6,23,0.6);
+      --radius: 12px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+    }
+
+    html,body {
+      height:100%;
+      margin:0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(180deg, #071029 0%, #071b2a 100%);
+      color: #e6eef6;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+
+    .container {
+      max-width:1200px;
+      margin:20px auto 90px;
+      padding:16px;
+      display:grid;
+      grid-template-columns: 1fr 420px;
+      gap:16px;
+    }
+
+    header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+
+    .brand {
+      display:flex;
+      gap:12px;
+      align-items:center;
+    }
+
+    .logo {
+      width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-weight:700;color:#04293a;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+    }
+
+    .title {
+      line-height:1;
+    }
+
+    h1 {font-size:18px;margin:0;}
+    p.lead {margin:0;font-size:12px;color:var(--muted);}
+
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:var(--radius);
+      box-shadow:var(--card-shadow);
+      padding:12px;
+      overflow:hidden;
+    }
+
+    .panel.small {padding:8px;}
+    .panel-header {display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+    label {display:block;font-size:12px;color:var(--muted);margin-bottom:6px;}
+
+    textarea, input, select {
+      width:100%;
+      padding:8px 10px;
+      border-radius:8px;
+      border:1px solid rgba(255,255,255,0.04);
+      background:transparent;
+      color:inherit;
+      font-size:13px;
+      box-sizing:border-box;
+      outline:none;
+      resize:vertical;
+      min-height:40px;
+    }
+
+    .grid {
+      display:grid;
+      gap:8px;
+    }
+
+    .controls {
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+    }
+
+    button {
+      background:linear-gradient(180deg,var(--accent-2),var(--accent));
+      color:#04293a;
+      border:none;
+      padding:8px 12px;
+      border-radius:8px;
+      cursor:pointer;
+      font-weight:600;
+      box-shadow: 0 6px 16px rgba(5,9,20,0.6);
+    }
+
+    button.ghost {
+      background:transparent;color:var(--accent);
+      border:1px solid rgba(255,255,255,0.04);
+    }
+
+    .muted {color:var(--muted);font-size:13px}
+
+    .flex {
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+
+    .token-output {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+    }
+
+    .token-pill {
+      padding:6px 10px;border-radius:999px;background:var(--glass);font-family:var(--mono);font-size:12px;border:1px solid rgba(255,255,255,0.02);
+    }
+
+    #plot {
+      height:480px;
+      min-height:320px;
+      border-radius:10px;
+      overflow:hidden;
+      background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+      border:1px solid rgba(255,255,255,0.02);
+    }
+
+    .status-row {
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-content:space-between;
+    }
+
+    .status-bar {
+      position:fixed;
+      left:0;right:0;bottom:0;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:10px 18px;
+      background:linear-gradient(180deg, rgba(2,6,23,0.9), rgba(2,6,23,0.98));
+      color:var(--muted);
+      border-top:1px solid rgba(255,255,255,0.02);
+      font-size:13px;
+      z-index:9999;
+    }
+
+    .status-log {
+      font-family:var(--mono);
+      color:#cde;
+      font-size:13px;
+    }
+
+    .sidebar {
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+    }
+
+    .summary {
+      font-size:12px;
+      color:var(--muted);
+    }
+
+    .logpane {
+      max-height:200px;
+      overflow:auto;
+      background:rgba(0,0,0,0.08);
+      padding:8px;border-radius:8px;font-family:var(--mono);font-size:12px;
+      color:#cfe;
+    }
+
+    .small-muted {font-size:12px;color:var(--muted)}
+
+    .row {display:flex;gap:8px;align-items:center;}
+    .col {display:flex;flex-direction:column;gap:6px;}
+
+    @media (max-width: 980px) {
+      .container {grid-template-columns: 1fr; padding-bottom:120px;}
+      #plot {height:360px;}
+    }
+
+  </style>
+</head>
+<body>
+  <header class="container" style="max-width:1200px;">
+    <div class="brand">
+      <div class="logo">EMB</div>
+      <div class="title">
+        <h1>Interactive Tokenizer & Embedding Trainer</h1>
+        <p class="lead">Type, tokenize, embed, and visualize — live. Built with TensorFlow.js & Plotly (local).</p>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div class="small-muted">Status: <span id="ui-status" style="color:var(--accent)">idle</span></div>
+      <button id="run-tests">Run test-suite</button>
+    </div>
+  </header>
+
+  <main class="container" aria-live="polite">
+    <section class="panel">
+      <div class="panel-header">
+        <strong>Input / Tokenizer</strong>
+        <div class="small-muted">Live tokenization while typing</div>
+      </div>
+
+      <div class="grid">
+        <div>
+          <label for="input-text">Main text (type here)</label>
+          <textarea id="input-text" rows="6" placeholder="Type or paste text here..."></textarea>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;">
+            <label for="tokenizer-type">Tokenizer type</label>
+            <select id="tokenizer-type" aria-label="tokenizer type">
+              <option value="whitespace">Split by whitespace</option>
+              <option value="comma">Split by comma</option>
+              <option value="regex">Custom regex</option>
+              <option value="ngram">n-grams (word n-grams)</option>
+              <option value="char">char-level</option>
+            </select>
+          </div>
+
+          <div style="width:120px;">
+            <label for="ngram-n">n (for n-gram)</label>
+            <input id="ngram-n" type="number" min="1" value="2" />
+          </div>
+
+          <div style="width:200px;">
+            <label for="custom-regex">Regex (for custom)</label>
+            <input id="custom-regex" type="text" placeholder="e.g. \b\w+\b" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div style="flex:1;">
+            <label>Tokenized preview</label>
+            <div class="token-output" id="token-preview"></div>
+          </div>
+
+          <div style="width:220px;">
+            <label>Stats</label>
+            <div class="panel small" style="padding:8px;">
+              <div class="small-muted">Tokens: <strong id="stat-token-count">0</strong></div>
+              <div class="small-muted">Unique: <strong id="stat-unique-count">0</strong></div>
+              <div class="small-muted">Vocabulary (auto) size: <strong id="stat-vocab-size">0</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row" style="justify-content:space-between;">
+          <div class="controls">
+            <button id="btn-tokenize" class="ghost">Tokenize now</button>
+            <button id="btn-build-vocab">Build vocabulary</button>
+            <button id="btn-clear">Clear</button>
+          </div>
+
+          <div class="muted">When tokenizing, tokens are previewed and vocabulary is built for embeddings.</div>
+        </div>
+
+      </div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-header"><strong>Embedding & Training</strong><div class="small-muted">Configure layer & optimizer</div></div>
+
+        <div class="grid">
+          <label for="embedding-dim">Embedding dimensions</label>
+          <input id="embedding-dim" type="number" min="1" value="3" />
+
+          <label for="train-dims">Number of dims to visualize (1-3 recommended)</label>
+          <select id="visual-dims">
+            <option value="1">1D</option>
+            <option value="2" selected>2D</option>
+            <option value="3">3D</option>
+          </select>
+
+          <label for="learning-rate">Learning rate</label>
+          <input id="learning-rate" type="number" min="1e-6" step="1e-4" value="0.05" />
+
+          <label for="optimizer-type">Optimizer</label>
+          <select id="optimizer-type">
+            <option value="sgd">SGD</option>
+            <option value="adam" selected>Adam</option>
+          </select>
+
+          <label for="batch-size">Batch size</label>
+          <input id="batch-size" type="number" min="1" value="8" />
+
+          <label for="epochs">Epochs</label>
+          <input id="epochs" type="number" min="1" value="10" />
+
+          <div class="row">
+            <button id="btn-create-model">Create model</button>
+            <button id="btn-train">Train</button>
+          </div>
+
+          <div class="small-muted">Model summary</div>
+          <pre id="model-summary" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;"></pre>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><strong>Probing</strong><div class="small-muted">Type a probe and see tokens + positions</div></div>
+        <label for="probe-text">Probe text</label>
+        <input id="probe-text" placeholder="Probe text to visualize..." />
+        <div class="row">
+          <button id="btn-probe">Probe</button>
+          <button id="btn-probe-live" class="ghost">Live probe</button>
+        </div>
+        <div class="small-muted" style="margin-top:8px;">Probe tokens:</div>
+        <div id="probe-preview" class="token-output" style="margin-top:6px;"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><strong>Logs</strong><div class="small-muted">Console-captured logs</div></div>
+        <div class="logpane" id="logpane" aria-live="polite"></div>
+      </div>
+    </aside>
+
+    <section class="panel" style="grid-column: 1 / -1;">
+      <div class="panel-header"><strong>Visualization</strong><div class="small-muted">Embeddings & token layout</div></div>
+      <div id="plot"></div>
+
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:space-between;">
+        <div class="small-muted">After each batch, embeddings are extracted and visualized. Projection via PCA when dims &gt; 3.</div>
+        <div class="row">
+          <button id="btn-export-emb" class="ghost">Export embeddings (console)</button>
+          <button id="btn-reset" class="ghost">Reset model</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="status-bar" role="status" aria-live="polite">
+    <div class="status-log" id="status-last">idle</div>
+    <div class="small-muted" id="status-meta">logs: <span id="log-count">0</span> | emb size: <span id="status-emb-size">0</span></div>
+  </div>
+
+  <script>
+    "use strict";
+
+    (function () {
+      /**
+       * Interactive Tokenizer & Embedding Trainer
+       * - Full single-file app using TensorFlow.js and Plotly (loaded locally via script src)
+       * - Abstract functions are defined once and reused.
+       * - Extensive logging with console capture and a visible status bar.
+       *
+       * Limitations & design choices:
+       * - Embedding is trained using a simple token->embedding->dense->softmax
+       *   reconstruction objective (token classification) to make embeddings trainable
+       *   without building context models. This is intentionally simple for demo purposes.
+       *
+       * - For dims > 3 we use PCA (via tf.svd) to project to 2D for visualization.
+       *
+       * - Error handling is included in most functions.
+       */
+
+      /* ----------------------
+         Utilities & log capture
+         ---------------------- */
+      const UI = {
+        $: (sel) => document.querySelector(sel),
+        $$: (sel) => Array.from(document.querySelectorAll(sel)),
+      };
+
+      // Log buffer and UI wiring
+      let logBuffer = [];
+      function pushLog(level, message) {
+        const time = new Date().toISOString();
+        const entry = { time, level, message };
+        logBuffer.push(entry);
+        if (logBuffer.length > 1000) logBuffer.shift();
+        try {
+          updateLogPane();
+          updateStatusBar(entry);
+        } catch (err) {
+          console.error("Failed to update UI logs", err);
+        }
+      }
+
+      // intercept console methods to mirror to UI
+      (function captureConsole() {
+        const methods = ["log", "info", "warn", "error", "debug"];
+        methods.forEach((m) => {
+          const orig = console[m].bind(console);
+          console[m] = function (...args) {
+            try {
+              const txt = args.map(a => {
+                if (a instanceof Error) return a.stack || a.message;
+                try { return typeof a === "object" ? JSON.stringify(a) : String(a); } catch (e) { return String(a); }
+              }).join(" ");
+              pushLog(m, txt);
+            } catch (err) {
+              orig("Logging failed", err);
+            }
+            orig(...args);
+          };
+        });
+      })();
+
+      function updateLogPane() {
+        const el = UI.$("#logpane");
+        if (!el) return;
+        el.innerHTML = logBuffer.slice(-50).map(e => {
+          const color = e.level === "error" ? "color:var(--danger)" : (e.level === "warn" ? "color:orange" : "");
+          return `<div style="${color}"><span style="color:var(--muted)">[${e.time}]</span> <strong>${e.level}</strong> ${escapeHtml(e.message)}</div>`;
+        }).join("");
+        el.scrollTop = el.scrollHeight;
+        UI.$("#log-count").textContent = logBuffer.length;
+      }
+
+      function updateStatusBar(entry) {
+        const last = entry || logBuffer[logBuffer.length - 1];
+        if (!last) return;
+        const el = UI.$("#status-last");
+        if (!el) return;
+        el.textContent = `[${last.level}] ${last.message.split("\n")[0]}`;
+        UI.$("#ui-status").textContent = last.level;
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      /* ----------------------
+         Tokenizers (abstract)
+         ---------------------- */
+
+      const Tokenizers = (function () {
+        function whitespaceTokenizer(text, opts) {
+          try {
+            if (!text) return [];
+            const toks = text.split(/\s+/).filter(Boolean);
+            console.debug("whitespaceTokenizer produced", toks.length, "tokens");
+            return toks;
+          } catch (err) {
+            console.error("whitespaceTokenizer error", err);
+            return [];
+          }
+        }
+
+        function commaTokenizer(text, opts) {
+          try {
+            if (!text) return [];
+            const toks = text.split(",").map(s => s.trim()).filter(Boolean);
+            console.debug("commaTokenizer produced", toks.length, "tokens");
+            return toks;
+          } catch (err) {
+            console.error("commaTokenizer error", err);
+            return [];
+          }
+        }
+
+        function regexTokenizer(text, opts) {
+          try {
+            if (!text) return [];
+            const pattern = opts && opts.pattern ? opts.pattern : "\\b\\w+\\b";
+            const re = new RegExp(pattern, "g");
+            const arr = text.match(re) || [];
+            console.debug("regexTokenizer pattern", pattern, "->", arr.length, "tokens");
+            return arr;
+          } catch (err) {
+            console.error("regexTokenizer error", err);
+            return [];
+          }
+        }
+
+        function ngramTokenizer(text, opts) {
+          try {
+            if (!text) return [];
+            const n = Math.max(1, Math.floor((opts && opts.n) || 2));
+            const words = text.split(/\s+/).filter(Boolean);
+            const res = [];
+            for (let i = 0; i < words.length; i++) {
+              const slice = words.slice(i, i + n);
+              if (slice.length === n) res.push(slice.join("_"));
+            }
+            console.debug("ngramTokenizer n=", n, "->", res.length, "tokens");
+            return res;
+          } catch (err) {
+            console.error("ngramTokenizer error", err);
+            return [];
+          }
+        }
+
+        function charTokenizer(text, opts) {
+          try {
+            if (!text) return [];
+            const arr = Array.from(text.replace(/\s+/g, ""));
+            console.debug("charTokenizer ->", arr.length, "tokens");
+            return arr;
+          } catch (err) {
+            console.error("charTokenizer error", err);
+            return [];
+          }
+        }
+
+        function buildTokenizer(type, opts) {
+          switch (type) {
+            case "whitespace": return (t) => whitespaceTokenizer(t, opts);
+            case "comma": return (t) => commaTokenizer(t, opts);
+            case "regex": return (t) => regexTokenizer(t, opts);
+            case "ngram": return (t) => ngramTokenizer(t, opts);
+            case "char": return (t) => charTokenizer(t, opts);
+            default: return (t) => whitespaceTokenizer(t, opts);
+          }
+        }
+
+        return {
+          buildTokenizer,
+          whitespaceTokenizer,
+          commaTokenizer,
+          regexTokenizer,
+          ngramTokenizer,
+          charTokenizer,
+        };
+      })();
+
+      /* ----------------------
+         Vocabulary & mapping
+         ---------------------- */
+
+      const Vocab = (function () {
+        let tokenToId = {};
+        let idToToken = [];
+
+        function buildFromTokens(tokens) {
+          tokenToId = {};
+          idToToken = [];
+          tokens.forEach(t => {
+            if (!(t in tokenToId)) {
+              tokenToId[t] = idToToken.length;
+              idToToken.push(t);
+            }
+          });
+          console.info("Vocabulary built", idToToken.length, "entries");
+          return { tokenToId, idToToken };
+        }
+
+        function addTokens(tokens) {
+          try {
+            tokens.forEach(t => {
+              if (!(t in tokenToId)) {
+                tokenToId[t] = idToToken.length;
+                idToToken.push(t);
+              }
+            });
+            console.debug("addTokens: vocab now", idToToken.length);
+          } catch (err) {
+            console.error("addTokens error", err);
+          }
+        }
+
+        function size() { return idToToken.length; }
+
+        function encode(tokens) {
+          try {
+            return tokens.map(t => {
+              if (t in tokenToId) return tokenToId[t];
+              // unknown -> add to vocab dynamically
+              tokenToId[t] = idToToken.length;
+              idToToken.push(t);
+              return tokenToId[t];
+            });
+          } catch (err) {
+            console.error("encode error", err);
+            return [];
+          }
+        }
+
+        function decode(ids) {
+          try {
+            return ids.map(i => idToToken[i] || "<UNK>");
+          } catch (err) {
+            console.error("decode error", err);
+            return [];
+          }
+        }
+
+        function reset() {
+          tokenToId = {};
+          idToToken = [];
+          console.info("Vocabulary reset");
+        }
+
+        function exportVocab() {
+          return { tokenToId: { ...tokenToId }, idToToken: idToToken.slice() };
+        }
+
+        return { buildFromTokens, addTokens, size, encode, decode, reset, exportVocab };
+      })();
+
+      /* ----------------------
+         Model & training
+         ---------------------- */
+
+      const Trainer = (function () {
+        let model = null;
+        let created = false;
+        let lastEmbeddingMatrix = null;
+
+        async function createModel(params) {
+          try {
+            tf.util.assert(typeof params.inputDim === "number" && params.inputDim > 0, "inputDim must be > 0");
+            tf.util.assert(typeof params.outputDim === "number" && params.outputDim > 0, "outputDim must be > 0");
+
+            const input = tf.input({ shape: [], dtype: "int32", name: "token_input" });
+            // embedding layer: inputDim=vocab size, outputDim=embeddingDim
+            const embedding = tf.layers.embedding({ inputDim: params.inputDim, outputDim: params.outputDim, inputLength: 1, name: "embedding" });
+            const embedOut = embedding.apply(input);
+            // embedOut shape: [batch, 1, outputDim] => flatten
+            const flatten = tf.layers.flatten().apply(embedOut);
+            // decode back to vocab via dense
+            const dense = tf.layers.dense({ units: params.inputDim, activation: "softmax", name: "decoder" }).apply(flatten);
+
+            const m = tf.model({ inputs: input, outputs: dense, name: "embed_model" });
+            const opt = createOptimizer(params.optimizer, params.learningRate);
+            m.compile({ optimizer: opt, loss: "sparseCategoricalCrossentropy", metrics: ["accuracy"] });
+
+            // store model
+            model = m;
+            created = true;
+            console.info("Model created", {
+              inputDim: params.inputDim,
+              outputDim: params.outputDim,
+              optimizer: params.optimizer,
+              lr: params.learningRate,
+            });
+
+            // print summary
+            const summaryEl = UI.$("#model-summary");
+            let summaryText = "";
+            m.summary(80, {
+              print: (s) => { summaryText += s + "\n"; }
+            });
+            if (summaryEl) summaryEl.textContent = summaryText;
+
+            return m;
+          } catch (err) {
+            console.error("createModel failed", err);
+            throw err;
+          }
+        }
+
+        function createOptimizer(name, lr) {
+          if (name === "adam") return tf.train.adam(lr);
+          if (name === "sgd") return tf.train.sgd(lr);
+          console.warn("Unknown optimizer, falling back to adam");
+          return tf.train.adam(lr);
+        }
+
+        function hasModel() { return created && model; }
+
+        function getEmbeddingMatrix() {
+          try {
+            if (!hasModel()) return null;
+            const embLayer = model.getLayer("embedding");
+            if (!embLayer) {
+              console.error("Embedding layer not found");
+              return null;
+            }
+            const weights = embLayer.getWeights();
+            if (!weights || weights.length === 0) {
+              console.error("Embedding weights not found");
+              return null;
+            }
+            // weights[0] is the matrix [vocabSize, embeddingDim]
+            lastEmbeddingMatrix = weights[0];
+            return lastEmbeddingMatrix;
+          } catch (err) {
+            console.error("getEmbeddingMatrix error", err);
+            return null;
+          }
+        }
+
+        async function trainOnDataset(encodedTokens, params, hooks) {
+          try {
+            if (!hasModel()) throw new Error("Model not created");
+            if (!Array.isArray(encodedTokens) || encodedTokens.length === 0) {
+              console.warn("No tokens to train on");
+              return;
+            }
+
+            const xs = tf.tensor1d(encodedTokens, "int32");
+            // targets are the same tokens (reconstruction)
+            const ys = tf.tensor1d(encodedTokens, "int32");
+
+            // dataset shaped as single-dim inputs; use .fit for simplicity
+            const batchSize = Math.max(1, Math.floor(params.batchSize || 8));
+            const epochs = Math.max(1, Math.floor(params.epochs || 3));
+
+            // Fit with onBatchEnd hook to visualize per batch
+            await model.fit(xs, ys, {
+              batchSize,
+              epochs,
+              shuffle: true,
+              callbacks: {
+                onTrainBegin: async (logs) => {
+                  console.info("Training started", logs || {});
+                  if (hooks && hooks.onTrainBegin) hooks.onTrainBegin(logs);
+                },
+                onEpochEnd: async (epoch, logs) => {
+                  console.info("Epoch end", epoch, logs);
+                  if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs);
+                },
+                onBatchEnd: async (batch, logs) => {
+                  console.debug("Batch end", batch, logs);
+                  if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs);
+                },
+                onTrainEnd: async (logs) => {
+                  console.info("Training finished", logs || {});
+                  if (hooks && hooks.onTrainEnd) hooks.onTrainEnd(logs);
+                }
+              }
+            });
+
+            xs.dispose();
+            ys.dispose();
+          } catch (err) {
+            console.error("Train failed", err);
+            throw err;
+          }
+        }
+
+        function resetModel() {
+          try {
+            if (model) {
+              model.dispose();
+              model = null;
+              created = false;
+              lastEmbeddingMatrix = null;
+              console.info("Model disposed and reset");
+            }
+          } catch (err) {
+            console.error("resetModel error", err);
+          }
+        }
+
+        return {
+          createModel,
+          hasModel,
+          getEmbeddingMatrix,
+          trainOnDataset,
+          resetModel,
+        };
+      })();
+
+      /* ----------------------
+         Visualization helpers
+         ---------------------- */
+
+      const Visual = (function () {
+        async function extractEmbeddings(embVar) {
+          // Expects embVar to be a tf.Tensor2D of shape [vocabSize, embeddingDim]
+          try {
+            if (!embVar) throw new Error("No embedding variable provided");
+            const arr = await embVar.array();
+            return arr;
+          } catch (err) {
+            console.error("extractEmbeddings error", err);
+            return [];
+          }
+        }
+
+        async function projectPCA(dataMatrix, k = 2) {
+          // dataMatrix: Array[vocabSize][dim] -> returns projected points Array[vocabSize][k]
+          try {
+            if (!Array.isArray(dataMatrix) || dataMatrix.length === 0) return [];
+            const X = tf.tensor2d(dataMatrix); // shape [n, d]
+            const mean = X.mean(0, true);
+            const Xc = X.sub(mean);
+            // compute SVD on Xc^T maybe
+            const XT = Xc.transpose(); // [d, n]
+            const svdRes = tf.svd(XT, true);
+            const U = svdRes.u; // [d,d]
+            const S = svdRes.s; // [min(d,n)]
+            // pick top-k principal components from U (d x d) columns
+            const components = U.slice([0,0],[U.shape[0], k]); // [d,k]
+            const projected = Xc.matMul(components); // [n,k]
+            const result = await projected.array();
+            X.dispose(); mean.dispose(); Xc.dispose(); XT.dispose(); svdRes.u.dispose(); svdRes.s.dispose();
+            projected.dispose(); components.dispose();
+            return result;
+          } catch (err) {
+            console.error("projectPCA error", err);
+            return [];
+          }
+        }
+
+        async function visualizePoints(points, labels, dimsRequested) {
+          try {
+            // points: Array[vocabSize][d] where d may be 1..n. dimsRequested is 1/2/3 target
+            const n = points.length;
+            const d = (points[0] || []).length || 0;
+            if (n === 0) {
+              Plotly.react("plot", [{
+                x: [], y: [], mode: "markers"
+              }], { margin:{t:30}, title: "No data" });
+              return;
+            }
+
+            let plotData = [];
+            if (d >= dimsRequested && dimsRequested <= 3) {
+              if (dimsRequested === 1) {
+                const x = points.map(p => p[0]);
+                const y = points.map((_,i) => 0);
+                plotData = [{
+                  x, y, text: labels, mode: "markers+text", type:"scatter",
+                  marker:{size:10},
+                  textposition:"top center"
+                }];
+              } else if (dimsRequested === 2) {
+                plotData = [{
+                  x: points.map(p => p[0]),
+                  y: points.map(p => p[1]),
+                  text: labels, mode: "markers+text", type:"scatter",
+                  marker:{size:10},
+                  textposition:"top center"
+                }];
+              } else { // 3d
+                plotData = [{
+                  x: points.map(p => p[0]),
+                  y: points.map(p => p[1]),
+                  z: points.map(p => p[2]),
+                  text: labels, mode: "markers", type:"scatter3d",
+                  marker:{size:4}
+                }];
+              }
+            } else {
+              // project to 2D via PCA if dims not enough or >3
+              const projected = await projectPCA(points, 2);
+              plotData = [{
+                x: projected.map(p => p[0]),
+                y: projected.map(p => p[1]),
+                text: labels, mode: "markers+text", type:"scatter",
+                marker:{size:8},
+                textposition:"top center"
+              }];
+            }
+
+            const layout = {
+              margin: { t: 30 },
+              paper_bgcolor: "rgba(0,0,0,0)",
+              plot_bgcolor: "rgba(255,255,255,0.01)",
+              hovermode: "closest",
+            };
+
+            Plotly.react("plot", plotData, layout, { responsive: true });
+            console.debug("Visualization updated: dims", d, "requested", dimsRequested);
+          } catch (err) {
+            console.error("visualizePoints error", err);
+          }
+        }
+
+        return { extractEmbeddings, visualizePoints, projectPCA };
+      })();
+
+      /* ----------------------
+         UI wiring & behavior
+         ---------------------- */
+
+      function initUI() {
+        try {
+          const inputText = UI.$("#input-text");
+          const tokenizerType = UI.$("#tokenizer-type");
+          const ngramN = UI.$("#ngram-n");
+          const customRegex = UI.$("#custom-regex");
+          const tokenPreview = UI.$("#token-preview");
+          const btnTokenize = UI.$("#btn-tokenize");
+          const btnBuildVocab = UI.$("#btn-build-vocab");
+          const btnClear = UI.$("#btn-clear");
+
+          // live tokenization: on input type
+          let liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: parseInt(ngramN.value, 10), pattern: customRegex.value });
+          function refreshTokenizerFromUI() {
+            liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: parseInt(ngramN.value, 10), pattern: customRegex.value });
+            console.debug("Tokenizer changed to", tokenizerType.value);
+            tokenizeAndPreview();
+          }
+          tokenizerType.addEventListener("change", refreshTokenizerFromUI);
+          ngramN.addEventListener("input", refreshTokenizerFromUI);
+          customRegex.addEventListener("input", refreshTokenizerFromUI);
+
+          inputText.addEventListener("input", () => {
+            tokenizeAndPreview();
+          });
+
+          btnTokenize.addEventListener("click", () => {
+            tokenizeAndPreview(true);
+          });
+
+          btnBuildVocab.addEventListener("click", () => {
+            const toks = tokenizeAndPreview(true);
+            Vocab.buildFromTokens(toks);
+            UI.$("#stat-vocab-size").textContent = Vocab.size();
+          });
+
+          btnClear.addEventListener("click", () => {
+            inputText.value = "";
+            tokenizeAndPreview(true);
+            Vocab.reset();
+            UI.$("#stat-vocab-size").textContent = Vocab.size();
+            console.info("Cleared input and reset vocabulary");
+          });
+
+          // model create & train
+          UI.$("#btn-create-model").addEventListener("click", async () => {
+            try {
+              const vocabSize = Math.max(1, Vocab.size());
+              const embeddingDim = Math.max(1, parseInt(UI.$("#embedding-dim").value, 10));
+              const optimizer = UI.$("#optimizer-type").value;
+              const lr = parseFloat(UI.$("#learning-rate").value);
+              await Trainer.createModel({ inputDim: vocabSize, outputDim: embeddingDim, optimizer, learningRate: lr });
+              UI.$("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`;
+            } catch (err) {
+              console.error("Failed to create model", err);
+            }
+          });
+
+          UI.$("#btn-train").addEventListener("click", async () => {
+            try {
+              if (!Trainer.hasModel()) {
+                console.warn("No model exists. Creating one automatically using current vocab & settings.");
+                await UI.$("#btn-create-model").click();
+              }
+              const encoded = Vocab.encode(tokenizeAndPreview(true));
+              if (encoded.length === 0) {
+                console.warn("No tokens to train on");
+                return;
+              }
+              const params = {
+                batchSize: parseInt(UI.$("#batch-size").value, 10),
+                epochs: parseInt(UI.$("#epochs").value, 10),
+                optimizer: UI.$("#optimizer-type").value,
+                learningRate: parseFloat(UI.$("#learning-rate").value),
+              };
+
+              // onBatchEnd hook: extract embeddings & visualize
+              const hooks = {
+                onBatchEnd: async (batch, logs) => {
+                  try {
+                    const embVar = Trainer.getEmbeddingMatrix();
+                    if (!embVar) return;
+                    const raw = await Visual.extractEmbeddings(embVar);
+                    const labels = Vocab.exportVocab().idToToken;
+                    const dimsReq = parseInt(UI.$("#visual-dims").value, 10);
+                    await Visual.visualizePoints(raw, labels, dimsReq);
+                  } catch (err) {
+                    console.error("onBatchEnd hook error", err);
+                  }
+                },
+                onEpochEnd: async (epoch, logs) => {
+                  console.info("Epoch finished:", epoch, logs);
+                },
+              };
+
+              await Trainer.trainOnDataset(encoded, params, hooks);
+              console.info("Training completed");
+            } catch (err) {
+              console.error("Training failed", err);
+            }
+          });
+
+          UI.$("#btn-probe").addEventListener("click", async () => {
+            await probeNow();
+          });
+
+          let liveProbe = false;
+          UI.$("#btn-probe-live").addEventListener("click", () => {
+            liveProbe = !liveProbe;
+            UI.$("#btn-probe-live").textContent = liveProbe ? "Live probe (on)" : "Live probe";
+            if (liveProbe) {
+              UI.$("#probe-text").addEventListener("input", probeNow);
+            } else {
+              UI.$("#probe-text").removeEventListener("input", probeNow);
+            }
+          });
+
+          UI.$("#btn-export-emb").addEventListener("click", async () => {
+            try {
+              const emb = Trainer.getEmbeddingMatrix();
+              if (!emb) {
+                console.warn("No embedding available");
+                return;
+              }
+              const arr = await emb.array();
+              console.log("Exported embeddings (vocabIndex => vector):", Vocab.exportVocab().idToToken, arr);
+              alert("Embeddings printed to console.");
+            } catch (err) {
+              console.error("Export failed", err);
+            }
+          });
+
+          UI.$("#btn-reset").addEventListener("click", () => {
+            try {
+              Trainer.resetModel();
+              UI.$("#model-summary").textContent = "";
+              UI.$("#status-emb-size").textContent = "0";
+            } catch (err) {
+              console.error("Reset failed", err);
+            }
+          });
+
+          // run tests button
+          UI.$("#run-tests").addEventListener("click", runTests);
+        } catch (err) {
+          console.error("initUI failed", err);
+        }
+      }
+
+      // Tokenize and render preview; returns tokens array
+      function tokenizeAndPreview(forceTokens = false) {
+        try {
+          const text = UI.$("#input-text").value;
+          const type = UI.$("#tokenizer-type").value;
+          const n = parseInt(UI.$("#ngram-n").value, 10) || 2;
+          const pattern = UI.$("#custom-regex").value || "\\b\\w+\\b";
+
+          const tokenizer = Tokenizers.buildTokenizer(type, { n, pattern });
+          const tokens = tokenizer(text);
+
+          // show preview
+          const previewEl = UI.$("#token-preview");
+          previewEl.innerHTML = "";
+          tokens.forEach(t => {
+            const span = document.createElement("div");
+            span.className = "token-pill";
+            span.textContent = t;
+            previewEl.appendChild(span);
+          });
+
+          UI.$("#stat-token-count").textContent = tokens.length;
+          UI.$("#stat-unique-count").textContent = Array.from(new Set(tokens)).length;
+
+          if (forceTokens) {
+            console.info("Tokenize completed:", tokens.length, "tokens");
+          }
+          return tokens;
+        } catch (err) {
+          console.error("tokenizeAndPreview error", err);
+          return [];
+        }
+      }
+
+      // Probe: show tokens from probe text & visualize their embedding positions if model exists
+      async function probeNow() {
+        try {
+          const s = UI.$("#probe-text").value;
+          const type = UI.$("#tokenizer-type").value;
+          const n = parseInt(UI.$("#ngram-n").value, 10) || 2;
+          const pattern = UI.$("#custom-regex").value || "\\b\\w+\\b";
+          const tokenizer = Tokenizers.buildTokenizer(type, { n, pattern });
+          const tokens = tokenizer(s);
+          const preview = UI.$("#probe-preview");
+          preview.innerHTML = "";
+          tokens.forEach(t => {
+            const el = document.createElement("div");
+            el.className = "token-pill";
+            el.textContent = t;
+            preview.appendChild(el);
+          });
+
+          // show positions in embedding space (if created)
+          if (Trainer.hasModel()) {
+            const embVar = Trainer.getEmbeddingMatrix();
+            if (!embVar) {
+              console.warn("No embedding matrix available");
+              return;
+            }
+            const vocab = Vocab.exportVocab();
+            const ids = tokens.map(t => (t in vocab.tokenToId ? vocab.tokenToId[t] : -1));
+            // fetch embeddings for those ids; for unknown tokens, create placeholder
+            const allEmb = await embVar.array();
+            const selected = ids.map((id, i) => {
+              if (id >= 0 && id < allEmb.length) return allEmb[id];
+              // for unknown tokens, fallback to zero vector
+              return new Array(allEmb[0].length).fill(0);
+            });
+            const labels = tokens.slice();
+            const dimsReq = parseInt(UI.$("#visual-dims").value, 10);
+            await Visual.visualizePoints(selected, labels, dimsReq);
+            console.info("Probe visualized", tokens.length, "tokens");
+          } else {
+            console.info("Probe tokenized (no model):", tokens.length, "tokens");
+          }
+        } catch (err) {
+          console.error("probeNow failed", err);
+        }
+      }
+
+      /* ----------------------
+         Test suite (simple)
+         ---------------------- */
+
+      async function runTests() {
+        const results = [];
+        console.group("Test Suite");
+        try {
+          console.log("Starting tests...");
+
+          // Test 1: Tokenizers basic behavior
+          try {
+            const t1 = Tokenizers.buildTokenizer("whitespace");
+            const out1 = t1("hello world  test");
+            if (Array.isArray(out1) && out1.length === 3) {
+              console.log("Tokenizer whitespace -> PASS");
+              results.push({ name: "tokenizer_whitespace", ok: true });
+            } else {
+              console.error("Tokenizer whitespace -> FAIL", out1);
+              results.push({ name: "tokenizer_whitespace", ok: false });
+            }
+          } catch (err) {
+            console.error("Tokenizer whitespace -> ERROR", err);
+            results.push({ name: "tokenizer_whitespace", ok: false, err });
+          }
+
+          // Test 2: n-gram tokenizer
+          try {
+            const tn = Tokenizers.buildTokenizer("ngram", { n: 2 });
+            const out2 = tn("one two three");
+            if (out2.length === 2 && out2[0] === "one_two") {
+              console.log("Tokenizer ngram -> PASS");
+              results.push({ name: "tokenizer_ngram", ok: true });
+            } else {
+              console.error("Tokenizer ngram -> FAIL", out2);
+              results.push({ name: "tokenizer_ngram", ok: false });
+            }
+          } catch (err) {
+            console.error("Tokenizer ngram -> ERROR", err);
+            results.push({ name: "tokenizer_ngram", ok: false, err });
+          }
+
+          // Test 3: Vocabulary build & encode
+          try {
+            Vocab.reset();
+            const toks = ["a","b","c","a"];
+            Vocab.buildFromTokens(toks);
+            const enc = Vocab.encode(["b","a","d"]);
+            if (Vocab.size() >= 3 && enc.length === 3) {
+              console.log("Vocab build & encode -> PASS");
+              results.push({ name: "vocab_build_encode", ok: true });
+            } else {
+              console.error("Vocab build & encode -> FAIL", enc);
+              results.push({ name: "vocab_build_encode", ok: false });
+            }
+          } catch (err) {
+            console.error("Vocab test -> ERROR", err);
+            results.push({ name: "vocab_build_encode", ok: false, err });
+          }
+
+          // Test 4: Model creation and one training step
+          try {
+            Vocab.reset();
+            Vocab.buildFromTokens(["one","two","three"]);
+            const m = await Trainer.createModel({ inputDim: Vocab.size(), outputDim: 3, optimizer: "adam", learningRate: 0.01 });
+            const enc = Vocab.encode(["one","two","three","one"]);
+            await Trainer.trainOnDataset(enc.slice(0,4), { batchSize: 2, epochs: 1 }, {
+              onBatchEnd: async (b, logs) => { console.log("test onBatchEnd", b, logs); }
+            });
+            console.log("Model training -> PASS");
+            results.push({ name: "model_train", ok: true });
+            Trainer.resetModel();
+          } catch (err) {
+            console.error("Model training -> FAIL", err);
+            results.push({ name: "model_train", ok: false, err });
+          }
+
+          // Test 5: Visualization (PCA) performs without throwing
+          try {
+            const sample = [[1,2,3],[2,3,4],[3,4,5],[0,0,1]];
+            const p = await Visual.projectPCA(sample, 2);
+            if (Array.isArray(p) && p.length === sample.length) {
+              console.log("PCA projection -> PASS");
+              results.push({ name: "pca_projection", ok: true });
+            } else {
+              console.error("PCA projection -> FAIL", p);
+              results.push({ name: "pca_projection", ok: false });
+            }
+          } catch (err) {
+            console.error("PCA projection -> ERROR", err);
+            results.push({ name: "pca_projection", ok: false, err });
+          }
+
+          // Report summary
+          const passed = results.filter(r => r.ok).length;
+          const total = results.length;
+          console.log(`Tests finished: ${passed}/${total} passed`);
+          alert(`Tests finished: ${passed}/${total} passed. See console for details.`);
+        } catch (err) {
+          console.error("Test suite failed", err);
+          alert("Test suite encountered an error; check console.");
+        } finally {
+          console.groupEnd();
+        }
+      }
+
+      /* ----------------------
+         Initialize
+         ---------------------- */
+
+      (function main() {
+        try {
+          console.info("App starting...");
+          initUI();
+
+          // default preview
+          tokenizeAndPreview();
+
+          // ensure plot area has placeholder
+          Plotly.newPlot("plot", [{ x: [], y: [], mode:"markers" }], { margin:{t:30}, title: "Embeddings" });
+
+          console.info("Ready.");
+        } catch (err) {
+          console.error("main init error", err);
+        }
+      })();
+
+    })();
+  </script>
+</body>
+</html>
