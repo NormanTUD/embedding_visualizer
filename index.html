@@ -152,7 +152,7 @@
         <div class="grid" style="margin-top:8px;">
             <div style="margin-bottom:10px;">
                 <div class="explain">
-                    <p>Diese Tools nutzen die Embeddings für tiefergehende didaktische Analysen, wie z.B. Vektor-Interpolation (Algebra) oder Ähnlichkeitsmuster im Text (Recurrence Plot).</p>
+                    <p>Diese Tools nutzen die Embeddings für tiefergehende didaktische Analysen, wie z.B. Ähnlichkeitsmuster im Text (Recurrence Plot).</p>
                 </div>
             </div>
 
@@ -163,11 +163,6 @@
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0;">
 
             <div style="margin-top:8px;">
-                <label for="algebra-slider">Interpolationsfaktor α: <span id="algebra-alpha">0.5</span></label>
-                <input type="range" min="0" max="1" step="0.05" value="0.5" id="algebra-slider" style="height:8px;padding:0;"/>
-            </div>
-            <div id="algebra-result" class="explain" style="background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;margin-top:8px;">
-                **Result (A + α(B-A)):** <span id="algebra-result-token">Modell fehlt.</span>
             </div>
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0;">
 
@@ -563,54 +558,7 @@
           return out;
         }
 
-        // Funktion für Nr. 8 (Word Algebra)
-        async function findNearestNeighbor(queryVector) {
-            if (!hasModel()) return { token: "<NO MODEL>", similarity: 0 };
-            const embeddingMatrix = getEmbeddingMatrix(); // tf.Tensor2D (VocabSize x Dim)
-            const tokens = Vocab.exportVocab().idToToken;
-
-            if (!embeddingMatrix || embeddingMatrix.shape[0] === 0) return { token: "<EMPTY VOCAB>", similarity: 0 };
-
-            let simScores = null;
-            let maxSim = -Infinity;
-            let nearestId = -1;
-
-            try {
-                // Query Vector muss (1 x Dim) sein. Squeeze, falls nötig
-                const queryTensor = queryVector.reshape([1, -1]);
-
-                // 1. Matrizen-Multiplikation für Dot-Products: (1 x Dim) * (Dim x VocabSize) = (1 x VocabSize)
-                const embeddingMatrixT = embeddingMatrix.transpose(); // (Dim x VocabSize)
-                const dotProducts = queryTensor.matMul(embeddingMatrixT).squeeze(); // 1D Tensor (VocabSize)
-
-                // 2. Normen berechnen
-                const embNorms = tf.norm(embeddingMatrix, 2, 1); // 1D Tensor (VocabSize)
-                const queryNormScalar = tf.norm(queryTensor).dataSync()[0];
-
-                // 3. Similarity = DotProducts / (queryNormScalar * embNorms)
-                simScores = dotProducts.div(embNorms.mul(queryNormScalar));
-
-                // 4. Index mit höchster Ähnlichkeit finden
-                const maxIndexTensor = simScores.argMax();
-                nearestId = maxIndexTensor.dataSync()[0];
-                maxSim = simScores.dataSync()[nearestId];
-
-                // Aufräumen von Zwischen-Tensoren
-                dotProducts.dispose();
-                embeddingMatrixT.dispose();
-                embNorms.dispose();
-                maxIndexTensor.dispose();
-                queryTensor.dispose();
-                
-                return { token: tokens[nearestId] || "<UNK>", similarity: maxSim };
-
-            } catch (e) {
-                console.error("findNearestNeighbor error", e);
-                if (simScores) simScores.dispose();
-                return { token: "<ERROR>", similarity: 0 };
-            }
-        }
-        return { createModel, hasModel, getEmbeddingMatrix, trainOnDataset, resetModel, readModelInternals, findNearestNeighbor };
+        return { createModel, hasModel, getEmbeddingMatrix, trainOnDataset, resetModel, readModelInternals };
       })();
 
       // Visualizations
@@ -1036,7 +984,6 @@
                 $("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`; 
                 pushLog("info","created model"); 
                 updateAllVisualizations(); 
-                updateWordAlgebra(); // Nr. 8: Initialisiere Word Algebra
             } catch (err) { 
                 pushLog("error","create model failed: "+err.message); 
             } 
@@ -1104,50 +1051,8 @@
             Visual.plotRecurrencePlot(text);
         });
 
-        // Nr. 8: Word Algebra
-        $("#algebra-token-a").addEventListener("input", updateWordAlgebra);
-        $("#algebra-token-b").addEventListener("input", updateWordAlgebra);
-        $("#algebra-slider").addEventListener("input", updateWordAlgebra);
-
       }
       
-      // Nr. 8: Word Algebra Logic
-      async function updateWordAlgebra() {
-            const tokenA = $("#algebra-token-a").value.trim();
-            const tokenB = $("#algebra-token-b").value.trim();
-            const alpha = parseFloat($("#algebra-slider").value);
-            $("#algebra-alpha").textContent = alpha.toFixed(2);
-
-            if (!Trainer.hasModel() || Vocab.size() < 2) {
-                $("#algebra-result-token").textContent = "Modell oder Vokabular fehlt.";
-                return;
-            }
-            
-            const ids = Vocab.encode([tokenA, tokenB]);
-            const exists = ids.every(id => id < Vocab.size());
-            if (ids.length < 2 || !exists) {
-                $("#algebra-result-token").textContent = "Bitte zwei unterschiedliche, gültige Tokens eingeben.";
-                return;
-            }
-
-
-            const embMatrix = Trainer.getEmbeddingMatrix();
-            const A = embMatrix.slice([ids[0], 0], [1, embMatrix.shape[1]]);
-            const B = embMatrix.slice([ids[1], 0], [1, embMatrix.shape[1]]);
-
-            // Interpolation: I = A + alpha * (B - A)
-            const B_minus_A = B.sub(A);
-            const diff_scaled = B_minus_A.mul(alpha);
-            const I = A.add(diff_scaled);
-
-            const result = await Trainer.findNearestNeighbor(I);
-            
-            $("#algebra-result-token").innerHTML = `
-                **${result.token}** (Sim: ${result.similarity.toFixed(4)})
-                <br><small class="muted">Interpolation: ${tokenA} + ${alpha.toFixed(2)} * (${tokenB} - ${tokenA})</small>
-            `;
-      }
-
 
       async function probeNow(silent=false) { 
         if (!Trainer.hasModel()) { if (!silent) pushLog("warn", "Model not created yet."); return; }
@@ -1207,7 +1112,6 @@
             await Visual.plotDimensionHistograms(raw, labels); // Nr. 7
             await renderEmbeddingInternals(true); 
             if (liveMode) await probeNow(true);
-            updateWordAlgebra(); // Nr. 8 aktualisieren
         } else {
             Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Embeddings"));
             Plotly.react("highdim-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("High-dim"));
@@ -1215,7 +1119,6 @@
             Plotly.react("dim-hist-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Histogramm-Verteilung")); // Nr. 7 aufräumen
             Plotly.react("radar-plot", [], layoutTransparent("Token Profile")); // Nr. 6 aufräumen
             Plotly.react("recurrence-plot", [], layoutTransparent("Recurrence Plot")); // Nr. 9 aufräumen
-            $("#algebra-result-token").textContent = "Modell fehlt."; // Nr. 8 aufräumen
         }
       } 
       
@@ -1360,15 +1263,6 @@
             if (!$("#plot").querySelector('svg')) throw new Error("Visualization test failed (Plotly not rendered).");
             pushLog("info", "Visualization test successful.");
             
-            // 6. Word Algebra Test (Nr. 8)
-            $("#algebra-token-a").value = "eins";
-            $("#algebra-token-b").value = "zwei";
-            $("#algebra-slider").value = 0.5;
-            await updateWordAlgebra();
-            const algebraResult = $("#algebra-result-token").textContent;
-            if (!algebraResult || algebraResult.includes("fehlt")) throw new Error("Word Algebra test failed.");
-            pushLog("info", "Word Algebra test successful.");
-
             pushLog("info", "All integration tests passed successfully.");
 
         } catch (e) {
@@ -1409,7 +1303,6 @@
           $("#tokenizer-type").value = "whitespace"; 
           tokenizeAndPreview(true);
           $("#btn-build-vocab").click(); 
-          updateWordAlgebra(); // Nr. 8: Initialisiere mit Default-Werten
           
           pushLog("info","App ready");
         } catch (e) { console.error("main init error", e); pushLog("error","App failed to start: "+e.message); }
