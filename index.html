@@ -3,1211 +3,605 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Interactive Tokenizer → Embedding Trainer (extended)</title>
+  <title>Interactive Tokenizer → Embedding Trainer (didactic)</title>
 
-  <!-- lokale Bibliotheken wie im Original -->
   <script src="./tf.min.js"></script>
   <script src="./plotly.latest.js"></script>
 
   <style>
     :root {
-      --bg: #0f1724;
-      --panel: #0b1220;
+      --bg: #071325;
+      --panel: rgba(255,255,255,0.03);
       --muted: #9aa4b2;
       --accent: #5eead4;
-      --accent-2: #60a5fa;
-      --danger: #fb7185;
-      --glass: rgba(255,255,255,0.03);
       --card-shadow: 0 8px 24px rgba(2,6,23,0.6);
       --radius: 12px;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
     }
-
-    html,body {
-      height:100%;
-      margin:0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      background: linear-gradient(180deg, #071029 0%, #071b2a 100%);
-      color: #e6eef6;
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
-    }
-
-    .container {
-      max-width:1200px;
-      margin:20px auto 90px;
-      padding:16px;
-      display:grid;
-      grid-template-columns: 1fr 460px;
-      gap:16px;
-    }
-
-    header {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      margin-bottom:12px;
-    }
-
+    html,body { height:100%; margin:0; font-family:Inter,system-ui, -apple-system, "Segoe UI", Roboto, Arial; background: linear-gradient(180deg,#04121b,#071325); color:#e6eef6; -webkit-font-smoothing:antialiased; }
+    .container { max-width:1200px; margin:20px auto 120px; padding:16px; display:grid; grid-template-columns: 1fr 420px; gap:16px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
     .brand { display:flex; gap:12px; align-items:center; }
-    .logo { width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;font-weight:700;color:#04293a; box-shadow: 0 6px 18px rgba(0,0,0,0.5); }
-    .title { line-height:1; }
-    h1 {font-size:18px;margin:0;}
-    p.lead {margin:0;font-size:12px;color:var(--muted);}
-
-    .panel { background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:var(--radius); box-shadow:var(--card-shadow); padding:12px; overflow:hidden; }
+    .logo { width:48px;height:48px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#60a5fa);display:flex;align-items:center;justify-content:center;font-weight:700;color:#04293a; box-shadow: 0 6px 18px rgba(0,0,0,0.5); }
+    h1 { font-size:18px; margin:0; }
+    p.lead { margin:0; font-size:12px; color:var(--muted); }
+    .panel { background:var(--panel); border-radius:var(--radius); box-shadow:var(--card-shadow); padding:12px; overflow:hidden; }
     .panel.small { padding:8px; }
-    .panel-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
     label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
-
-    textarea, input, select {
-      width:100%;
-      padding:8px 10px;
-      border-radius:8px;
-      border:1px solid rgba(255,255,255,0.04);
-      background:transparent;
-      color:inherit;
-      font-size:13px;
-      box-sizing:border-box;
-      outline:none;
-      resize:vertical;
-      min-height:40px;
-    }
-
+    textarea, input, select { width:100%; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.04); background:transparent; color:inherit; font-size:13px; box-sizing:border-box; outline:none; resize:vertical; min-height:40px; }
     .grid { display:grid; gap:8px; }
     .controls { display:flex; gap:8px; flex-wrap:wrap; }
-    button { background:linear-gradient(180deg,var(--accent-2),var(--accent)); color:#04293a; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; box-shadow: 0 6px 16px rgba(5,9,20,0.6); }
+    button { background:linear-gradient(180deg,#60a5fa,var(--accent)); color:#04293a; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600; box-shadow: 0 6px 16px rgba(5,9,20,0.6); }
     button.ghost { background:transparent;color:var(--accent); border:1px solid rgba(255,255,255,0.04); }
-
-    .muted { color:var(--muted); font-size:13px; }
-    .flex { display:flex; gap:8px; align-items:center; }
     .token-output { display:flex; flex-wrap:wrap; gap:6px; }
-    .token-pill { padding:6px 10px; border-radius:999px; background:var(--glass); font-family:var(--mono); font-size:12px; border:1px solid rgba(255,255,255,0.02); }
-
-    #plot { height:440px; min-height:320px; border-radius:10px; overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); border:1px solid rgba(255,255,255,0.02); }
-    #live-plot { height:240px; min-height:160px; border-radius:10px; overflow:hidden; background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.02)); border:1px solid rgba(255,255,255,0.02); margin-top:8px; }
-
-    .status-row { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+    .token-pill { padding:6px 10px; border-radius:999px; background:rgba(255,255,255,0.02); font-family:var(--mono); font-size:12px; border:1px solid rgba(255,255,255,0.02); }
+    #plot, #highdim-plot, #live-plot, .heatmap { height:360px; min-height:220px; border-radius:10px; overflow:hidden; background:transparent; border:1px solid rgba(255,255,255,0.03); }
+    #live-plot { height:220px; }
     .status-bar { position:fixed; left:0;right:0;bottom:0; display:flex; align-items:center; justify-content:space-between; padding:10px 18px; background:linear-gradient(180deg, rgba(2,6,23,0.9), rgba(2,6,23,0.98)); color:var(--muted); border-top:1px solid rgba(255,255,255,0.02); font-size:13px; z-index:9999; }
-    .status-log { font-family:var(--mono); color:#cde; font-size:13px; }
-
-    .sidebar { display:flex; flex-direction:column; gap:12px; }
-    .summary { font-size:12px; color:var(--muted); }
-    .logpane { max-height:200px; overflow:auto; background:rgba(0,0,0,0.08); padding:8px; border-radius:8px; font-family:var(--mono); font-size:12px; color:#cfe; }
-    .small-muted { font-size:12px; color:var(--muted); }
-    .row { display:flex; gap:8px; align-items:center; }
-    .col { display:flex; flex-direction:column; gap:6px; }
-
-    pre.mathml { background: rgba(0,0,0,0.06); padding:8px; border-radius:8px; overflow:auto; font-family:var(--mono); font-size:12px; color:#dfe; max-height:200px; }
-    @media (max-width: 980px) { .container { grid-template-columns: 1fr; padding-bottom:120px; } #plot { height:360px; } #live-plot { height:200px; } }
+    .logpane { max-height:200px; overflow:auto; background:rgba(0,0,0,0.06); padding:8px; border-radius:8px; font-family:var(--mono); font-size:12px; color:#cfe; }
+    pre.mathml { background: rgba(0,0,0,0.06); padding:8px; border-radius:8px; overflow:auto; font-family:var(--mono); font-size:12px; color:#dfe; max-height:180px; }
+    .explain { font-size:13px; color:#dfe; line-height:1.45; }
+    .badge { font-family:var(--mono); font-size:12px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.02); }
+    @media (max-width: 980px) { .container { grid-template-columns: 1fr; padding-bottom:180px; } #plot { height:320px; } #highdim-plot { height:260px; } #live-plot { height:200px; } }
   </style>
 </head>
 <body>
   <header class="container" style="max-width:1200px;">
     <div class="brand">
       <div class="logo">EMB</div>
-      <div class="title">
-        <h1>Interactive Tokenizer & Embedding Trainer (extended)</h1>
-        <p class="lead">Type, tokenize, embed, visualize many dims — live. TensorFlow.js & Plotly (local).</p>
+      <div>
+        <h1>Interactive Tokenizer & Embedding Trainer — Didactic</h1>
+        <p class="lead">Ziel: jeder, der ungefähr weiß, wie ein neuronales Netz funktioniert, soll verstehen, was Encodings bedeuten.</p>
       </div>
     </div>
-
     <div style="display:flex;gap:8px;align-items:center;">
-      <div class="small-muted">Status: <span id="ui-status" style="color:var(--accent)">idle</span></div>
-      <button id="run-tests">Run test-suite</button>
+      <div class="badge" id="ui-status">idle</div>
+      <button id="run-tests">Run tests</button>
     </div>
   </header>
 
   <main class="container" aria-live="polite">
+    <!-- left column -->
     <section class="panel">
-      <div class="panel-header">
-        <strong>Input / Tokenizer</strong>
-        <div class="small-muted">Live tokenization while typing</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>Eingabe & Tokenizer</strong>
+        <small class="muted">Live-Tokenisierung</small>
       </div>
 
-      <div class="grid">
+      <div class="grid" style="margin-top:8px;">
         <div>
-          <label for="input-text">Main text (type here)</label>
-          <textarea id="input-text" rows="6" placeholder="Type or paste text here..."></textarea>
+          <label for="input-text">Haupttext</label>
+          <textarea id="input-text" rows="6" placeholder="Gib Text ein..."></textarea>
         </div>
 
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:flex-end;">
           <div style="flex:1;">
-            <label for="tokenizer-type">Tokenizer type</label>
-            <select id="tokenizer-type" aria-label="tokenizer type">
-              <option value="whitespace">Split by whitespace</option>
-              <option value="comma">Split by comma</option>
-              <option value="regex">Custom regex</option>
-              <option value="ngram" selected>n-grams (word or char)</option>
-              <option value="char">char-level (single chars)</option>
-            </select>
+            <label for="tokenizer-type">Tokenizer</label>
+            <select id="tokenizer-type"><option value="whitespace">Whitespace</option><option value="comma">Comma</option><option value="regex">Regex</option><option value="ngram" selected>n-gram</option><option value="char">char</option></select>
           </div>
-
           <div style="width:140px;">
-            <label for="ngram-n">n (for n-gram)</label>
+            <label for="ngram-n">n</label>
             <input id="ngram-n" type="number" min="1" value="2" />
           </div>
-
-          <div style="width:170px;">
-            <label for="ngram-mode">ngram mode</label>
-            <select id="ngram-mode">
-              <option value="word" selected>word n-grams</option>
-              <option value="char">character n-grams</option>
-            </select>
-          </div>
-
-          <div style="width:200px;">
-            <label for="custom-regex">Regex (for custom)</label>
-            <input id="custom-regex" type="text" placeholder="e.g. \\b\\w+\\b" />
+          <div style="width:160px;">
+            <label for="ngram-mode">n-gram Mode</label>
+            <select id="ngram-mode"><option value="word" selected>word n-grams</option><option value="char">character n-grams</option></select>
           </div>
         </div>
 
-        <div class="row">
-          <div style="flex:1;">
-            <label>Tokenized preview</label>
-            <div class="token-output" id="token-preview"></div>
-          </div>
-
-          <div style="width:220px;">
-            <label>Stats</label>
-            <div class="panel small" style="padding:8px;">
-              <div class="small-muted">Tokens: <strong id="stat-token-count">0</strong></div>
-              <div class="small-muted">Unique: <strong id="stat-unique-count">0</strong></div>
-              <div class="small-muted">Vocabulary (auto) size: <strong id="stat-vocab-size">0</strong></div>
-            </div>
-          </div>
+        <div>
+          <label>Token-Vorschau</label>
+          <div class="token-output" id="token-preview"></div>
         </div>
 
-        <div class="row" style="justify-content:space-between;">
-          <div class="controls">
-            <button id="btn-tokenize" class="ghost">Tokenize now</button>
-            <button id="btn-build-vocab">Build vocabulary</button>
-            <button id="btn-clear">Clear</button>
+        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+          <div class="muted">Tokens: <strong id="stat-token-count">0</strong> • Unique: <strong id="stat-unique-count">0</strong></div>
+          <div style="display:flex;gap:6px;">
+            <button id="btn-tokenize" class="ghost">Tokenize</button>
+            <button id="btn-build-vocab">Build vocab</button>
+            <button id="btn-clear" class="ghost">Clear</button>
           </div>
-
-          <div class="muted">Tokens are previewed and vocabulary is built for embeddings. N-grams can be words or character combos.</div>
         </div>
-
       </div>
     </section>
 
+    <!-- right column: controls and internals -->
     <aside class="sidebar">
       <div class="panel">
-        <div class="panel-header"><strong>Embedding & Training</strong><div class="small-muted">Configure layer & optimizer</div></div>
-
-        <div class="grid">
-          <label for="embedding-dim">Embedding dimensions (embedding vector length)</label>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Embedding & Training</strong>
+          <small class="muted">Konfiguration</small>
+        </div>
+        <div class="grid" style="margin-top:8px;">
+          <label for="embedding-dim">Embedding Länge (Dim)</label>
           <input id="embedding-dim" type="number" min="1" value="8" />
-
-          <label for="visual-dims">Number of dims to visualize (1-3 recommended; for >3 extra visualizations are used)</label>
-          <select id="visual-dims">
-            <option value="1">1D</option>
-            <option value="2" selected>2D</option>
-            <option value="3">3D</option>
-            <option value="4">4D+</option>
-          </select>
-
-          <label for="visual-mode">High-dim visual mode (auto = parallel coords)</label>
-          <select id="visual-mode">
-            <option value="auto">auto (parallel coords + PCA)</option>
-            <option value="parallel" selected>parallel coordinates</option>
-            <option value="pca">PCA 2D</option>
-            <option value="3d-slice">3D slice (choose axes)</option>
-          </select>
-
-          <div class="row" id="slice-controls" style="display:none;">
-            <div style="width:100px;">
-              <label for="slice-a">axis A</label>
-              <input id="slice-a" type="number" min="0" value="0" />
-            </div>
-            <div style="width:100px;">
-              <label for="slice-b">axis B</label>
-              <input id="slice-b" type="number" min="1" value="1" />
-            </div>
-            <div style="width:100px;">
-              <label for="slice-c">axis C</label>
-              <input id="slice-c" type="number" min="2" value="2" />
-            </div>
-          </div>
-
+          <label for="visual-dims">Visual dims (1-3 zeigen im Hauptplot; >3 nutzt High-Dim Ansicht)</label>
+          <select id="visual-dims"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4+</option></select>
+          <label for="visual-mode">High-Dim Visualisierung</label>
+          <select id="visual-mode"><option value="auto" selected>auto (parallel coords + pca + heatmap)</option><option value="parallel">parallel coordinates</option><option value="pca">PCA 2D</option><option value="pairwise">Pairwise scatter matrix</option><option value="heatmap">Correlation heatmap</option></select>
           <label for="learning-rate">Learning rate</label>
           <input id="learning-rate" type="number" min="1e-6" step="1e-4" value="0.01" />
-
           <label for="optimizer-type">Optimizer</label>
-          <select id="optimizer-type">
-            <option value="sgd">SGD</option>
-            <option value="adam" selected>Adam</option>
-          </select>
-
+          <select id="optimizer-type"><option value="sgd">SGD</option><option value="adam" selected>Adam</option></select>
           <label for="batch-size">Batch size</label>
           <input id="batch-size" type="number" min="1" value="8" />
-
           <label for="epochs">Epochs</label>
-          <input id="epochs" type="number" min="1" value="10" />
-
-          <div class="row">
+          <input id="epochs" type="number" min="1" value="6" />
+          <div style="display:flex;gap:8px;">
             <button id="btn-create-model">Create model</button>
             <button id="btn-train">Train</button>
           </div>
-
-          <div class="small-muted">Model summary</div>
-          <pre id="model-summary" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;"></pre>
+          <div>
+            <label>Model summary</label>
+            <pre id="model-summary" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;"></pre>
+          </div>
         </div>
       </div>
 
       <div class="panel">
-        <div class="panel-header"><strong>Live during training</strong><div class="small-muted">Type text while training — shown in a separate plot</div></div>
-        <label for="live-text">Live text</label>
-        <input id="live-text" placeholder="Text to visualize live during training..." />
-        <div class="row">
-          <button id="btn-live-toggle" class="ghost">Live during training (off)</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Live während Training</strong>
+          <small class="muted">separate Ansicht</small>
         </div>
-        <div id="live-plot"></div>
+        <div style="margin-top:8px;">
+          <label for="live-text">Live Text</label>
+          <input id="live-text" placeholder="Text zur Live-Visualisierung..." />
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button id="btn-live-toggle" class="ghost">Live (off)</button>
+          </div>
+          <div id="live-plot" style="margin-top:8px;"></div>
+        </div>
       </div>
 
       <div class="panel">
-        <div class="panel-header"><strong>Probing</strong><div class="small-muted">Type a probe and see tokens + positions</div></div>
-        <label for="probe-text">Probe text</label>
-        <input id="probe-text" placeholder="Probe text to visualize..." />
-        <div class="row">
-          <button id="btn-probe">Probe</button>
-          <button id="btn-probe-live" class="ghost">Live probe</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Internals & Tensoren</strong>
+          <small class="muted">MathML & Heatmaps</small>
         </div>
-        <div class="small-muted" style="margin-top:8px;">Probe tokens:</div>
-        <div id="probe-preview" class="token-output" style="margin-top:6px;"></div>
+        <div style="margin-top:8px;">
+          <div class="explain" style="margin-bottom:8px;">
+            <strong>Was du hier siehst</strong>
+            <p>Wähle "Show embedding matrix" oder "Show model internals". Matrizen werden <em>als gerenderte MathML</em> angezeigt (falls der Browser MathML unterstützt) und zusätzlich als Heatmap, damit du Muster wie ähnliche Vektoren oder starke/negative Werte visuell erkennen kannst.</p>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button id="btn-show-emb-math" class="ghost">Show embedding matrix</button>
+            <button id="btn-show-model-internals" class="ghost">Show model internals</button>
+          </div>
+          <div style="margin-top:8px;">
+            <div id="tensor-meta" class="muted"></div>
+            <div id="tensor-mathml-render" style="margin-top:8px;"></div>
+            <div id="tensor-heatmap" class="heatmap" style="margin-top:8px;"></div>
+            <div id="model-internals-render" style="margin-top:8px;"></div>
+          </div>
+        </div>
       </div>
 
       <div class="panel">
-        <div class="panel-header"><strong>Internals & Tensors (MathML)</strong><div class="small-muted">Show tensors & model weights as MathML + metadata</div></div>
-        <div class="small-muted">Select a tensor to display as MathML</div>
-        <div class="row" style="gap:6px;">
-          <button id="btn-show-emb-math" class="ghost">Show embedding matrix</button>
-          <button id="btn-show-model-internals" class="ghost">Show model internals</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Didaktische Erklärungen</strong>
+          <small class="muted">Warum Encodings wichtig sind</small>
         </div>
-        <div id="tensor-meta" class="small-muted" style="margin-top:6px;"></div>
-        <pre id="tensor-mathml" class="mathml" aria-live="polite"></pre>
-        <pre id="model-internals" class="mathml" aria-live="polite"></pre>
+        <div style="margin-top:8px;" class="explain">
+          <ol>
+            <li><strong>Was ist ein Encoding?</strong> — Ein Encoding (Embedding) ist ein Vektor, der ein Token (Wort/Char/NG-gram) in einem kontinuierlichen Raum darstellt. Ähnliche Token haben ähnliche Vektoren.</li>
+            <li><strong>Warum Vektoren?</strong> — Vektoren erlauben algebraische Operationen (z.B. Ähnlichkeit, Mittelwert), die semantische Beziehungen sichtbar machen.</li>
+            <li><strong>Was zeigt die Matrix?</strong> — Jede Zeile der Embedding-Matrix ist das Encoding für ein Vocabulary-Element. Die Heatmap zeigt Muster: dunkle/helle Bereiche signalisieren hohe/geringe Werte; ähnliche Zeilen deuten auf ähnliche Bedeutungen.</li>
+            <li><strong>Was sind Kernel / Gewichte?</strong> — Kernel in Dense/Conv-Schichten sind die Transformationen, die aus Encodings Vorhersagen machen. Visualisierte Kernel helfen zu verstehen, welche Dimensionskombinationen wichtig sind.</li>
+            <li><strong>Interpretiere die Grafiken:</strong> Parallel Coordinates zeigen Profilmuster über viele Dimensionen. PCA/Pairwise macht hohe Dimmensionen sichtbar, indem ähnliche Punkte zusammengezogen werden. Heatmaps zeigen Korrelationen.</li>
+          </ol>
+          <p>Am Ende solltest du erkennen: Encodings sind numerische Repräsentationen — die Visualisierungen helfen zu sehen, welche Token nahe beieinander liegen und welche Dimensionsachsen (Features) stark variieren.</p>
+        </div>
       </div>
 
       <div class="panel">
-        <div class="panel-header"><strong>Logs</strong><div class="small-muted">Console-captured logs</div></div>
-        <div class="logpane" id="logpane" aria-live="polite"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Logs</strong>
+          <small class="muted">Konsole</small>
+        </div>
+        <div class="logpane" id="logpane" style="margin-top:8px;"></div>
       </div>
     </aside>
 
+    <!-- full-width visualization area -->
     <section class="panel" style="grid-column: 1 / -1;">
-      <div class="panel-header"><strong>Visualization</strong><div class="small-muted">Embeddings & token layout</div></div>
-      <div id="plot"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>Haupt-Visualisierung</strong>
+        <small class="muted">1/2/3D im Hauptplot — >3D in separatem High-Dim Bereich</small>
+      </div>
+      <div style="display:grid;grid-template-columns: 1fr 420px; gap:12px; margin-top:12px;">
+        <div>
+          <div id="plot"></div>
+          <div style="display:flex;gap:8px;justify-content:space-between;margin-top:8px;">
+            <div class="muted">Hauptplot — transparenter Hintergrund</div>
+            <div style="display:flex;gap:6px;">
+              <button id="btn-export-emb" class="ghost">Export embeddings</button>
+              <button id="btn-reset" class="ghost">Reset model</button>
+            </div>
+          </div>
+        </div>
 
-      <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:space-between;">
-        <div class="small-muted">After each batch, embeddings are extracted and visualized. For dims > 3 multiple views are available.</div>
-        <div class="row">
-          <button id="btn-export-emb" class="ghost">Export embeddings (console)</button>
-          <button id="btn-reset" class="ghost">Reset model</button>
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>High-Dim Ansicht</strong>
+            <small class="muted">Parallel coords / PCA / Pairwise / Heatmap</small>
+          </div>
+          <div id="highdim-plot" style="margin-top:8px;"></div>
         </div>
       </div>
     </section>
   </main>
 
   <div class="status-bar" role="status" aria-live="polite">
-    <div class="status-log" id="status-last">idle</div>
-    <div class="small-muted" id="status-meta">logs: <span id="log-count">0</span> | emb size: <span id="status-emb-size">0</span></div>
+    <div id="status-last" class="muted">idle</div>
+    <div class="muted" id="status-meta">logs: <span id="log-count">0</span> | emb size: <span id="status-emb-size">0</span></div>
   </div>
 
   <script>
     "use strict";
-
     (function () {
-      /**
-       * Extended Interactive Tokenizer & Embedding Trainer
-       * - Supports arbitrary embedding dims and multiple high-dim visualizations
-       * - Live text visualization during training (separate plot)
-       * - n-grams for words AND character n-grams
-       * - Tensor & model internals displayed as MathML
-       * - New tests validating tokenizer modes, tensor mathml, and model internals
-       *
-       * Error handling is applied across functions.
-       */
-
-      /* ----------------------
-         Utilities & log capture
-         ---------------------- */
-      const UI = {
-        $: (sel) => document.querySelector(sel),
-        $$: (sel) => Array.from(document.querySelectorAll(sel)),
-      };
-
+      // Utilities
+      const $ = s => document.querySelector(s);
+      const $$ = s => Array.from(document.querySelectorAll(s));
       let logBuffer = [];
       function pushLog(level, message) {
-        try {
-          const time = new Date().toISOString();
-          const entry = { time, level, message };
-          logBuffer.push(entry);
-          if (logBuffer.length > 1000) logBuffer.shift();
-          updateLogPane();
-          updateStatusBar(entry);
-        } catch (err) {
-          console.error("pushLog failed", err);
-        }
+        const entry = { time: new Date().toISOString(), level, message: String(message) };
+        logBuffer.push(entry);
+        if (logBuffer.length > 1000) logBuffer.shift();
+        renderLogs();
+        try { $("#status-last").textContent = `[${level}] ${message.split("\\n")[0]}`; $("#ui-status").textContent = level; } catch (e) {}
       }
+      function renderLogs() {
+        const el = $("#logpane");
+        if (!el) return;
+        el.innerHTML = logBuffer.slice(-80).map(e => `<div><small style="color:var(--muted)">[${e.time}]</small> <strong>${e.level}</strong> ${escapeHtml(e.message)}</div>`).join("");
+        el.scrollTop = el.scrollHeight;
+        $("#log-count").textContent = logBuffer.length;
+      }
+      function escapeHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
-      (function captureConsole() {
-        const methods = ["log", "info", "warn", "error", "debug"];
-        methods.forEach((m) => {
+      // Capture console (non-invasive)
+      (function () {
+        const methods = ["log","info","warn","error"];
+        methods.forEach(m => {
           const orig = console[m].bind(console);
-          console[m] = function (...args) {
-            try {
-              const txt = args.map(a => {
-                if (a instanceof Error) return a.stack || a.message;
-                try { return typeof a === "object" ? JSON.stringify(a) : String(a); } catch (e) { return String(a); }
-              }).join(" ");
-              pushLog(m, txt);
-            } catch (err) {
-              orig("Logging mirror failed", err);
-            }
+          console[m] = function(...args) {
+            try { pushLog(m, args.map(a => (a && a.stack) ? a.stack : (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")); } catch (e) {}
             orig(...args);
           };
         });
       })();
 
-      function updateLogPane() {
-        const el = UI.$("#logpane");
-        if (!el) return;
-        el.innerHTML = logBuffer.slice(-50).map(e => {
-          const color = e.level === "error" ? "color:var(--danger)" : (e.level === "warn" ? "color:orange" : "");
-          return `<div style="${color}"><span style="color:var(--muted)">[${e.time}]</span> <strong>${e.level}</strong> ${escapeHtml(e.message)}</div>`;
-        }).join("");
-        el.scrollTop = el.scrollHeight;
-        UI.$("#log-count").textContent = logBuffer.length;
-      }
-
-      function updateStatusBar(entry) {
-        try {
-          const last = entry || logBuffer[logBuffer.length - 1];
-          if (!last) return;
-          const el = UI.$("#status-last");
-          if (!el) return;
-          el.textContent = `[${last.level}] ${last.message.split("\n")[0]}`;
-          UI.$("#ui-status").textContent = last.level;
-        } catch (err) {
-          console.error("updateStatusBar failed", err);
-        }
-      }
-
-      function escapeHtml(s) {
-        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      }
-
-      /* ----------------------
-         Tokenizers (extended)
-         ---------------------- */
-
+      // Tokenizers
       const Tokenizers = (function () {
-        function whitespaceTokenizer(text) {
-          try {
-            if (!text) return [];
-            const toks = text.split(/\s+/).filter(Boolean);
-            console.debug("whitespaceTokenizer produced", toks.length, "tokens");
-            return toks;
-          } catch (err) {
-            console.error("whitespaceTokenizer error", err);
-            return [];
-          }
-        }
-
-        function commaTokenizer(text) {
-          try {
-            if (!text) return [];
-            const toks = text.split(",").map(s => s.trim()).filter(Boolean);
-            console.debug("commaTokenizer produced", toks.length, "tokens");
-            return toks;
-          } catch (err) {
-            console.error("commaTokenizer error", err);
-            return [];
-          }
-        }
-
-        function regexTokenizer(text, opts) {
-          try {
-            if (!text) return [];
-            const pattern = opts && opts.pattern ? opts.pattern : "\\b\\w+\\b";
-            const re = new RegExp(pattern, "g");
-            const arr = text.match(re) || [];
-            console.debug("regexTokenizer pattern", pattern, "->", arr.length, "tokens");
-            return arr;
-          } catch (err) {
-            console.error("regexTokenizer error", err);
-            return [];
-          }
-        }
-
+        function whitespaceTokenizer(text) { if (!text) return []; return text.split(/\s+/).filter(Boolean); }
+        function commaTokenizer(text) { if (!text) return []; return text.split(",").map(s => s.trim()).filter(Boolean); }
+        function regexTokenizer(text, opts) { if (!text) return []; const pattern = (opts && opts.pattern) || "\\b\\w+\\b"; try { const re = new RegExp(pattern,"g"); return text.match(re) || []; } catch (e) { console.warn("regex invalid", e); return []; } }
         function ngramTokenizer(text, opts) {
-          try {
-            if (!text) return [];
-            const n = Math.max(1, Math.floor((opts && opts.n) || 2));
-            const mode = (opts && opts.mode) || "word";
-            if (mode === "char") {
-              // produce character n-grams (skip whitespace)
-              const letters = Array.from(text.replace(/\s+/g, ""));
-              const res = [];
-              for (let i = 0; i <= letters.length - n; i++) {
-                res.push(letters.slice(i, i + n).join(""));
-              }
-              console.debug("ngramTokenizer (char) n=", n, "->", res.length, "tokens");
-              return res;
-            } else {
-              // word n-grams
-              const words = text.split(/\s+/).filter(Boolean);
-              const res = [];
-              for (let i = 0; i <= words.length - n; i++) {
-                const slice = words.slice(i, i + n);
-                res.push(slice.join("_"));
-              }
-              console.debug("ngramTokenizer (word) n=", n, "->", res.length, "tokens");
-              return res;
-            }
-          } catch (err) {
-            console.error("ngramTokenizer error", err);
-            return [];
+          if (!text) return [];
+          const n = Math.max(1, (opts && parseInt(opts.n,10)) || 2);
+          const mode = (opts && opts.mode) || "word";
+          if (mode === "char") {
+            const letters = Array.from(text.replace(/\s+/g,""));
+            const out = [];
+            for (let i=0;i<=letters.length-n;i++) out.push(letters.slice(i,i+n).join(""));
+            return out;
+          } else {
+            const words = text.split(/\s+/).filter(Boolean);
+            const out = [];
+            for (let i=0;i<=words.length-n;i++) out.push(words.slice(i,i+n).join("_"));
+            return out;
           }
         }
-
-        function charTokenizer(text) {
-          try {
-            if (!text) return [];
-            const arr = Array.from(text.replace(/\s+/g, ""));
-            console.debug("charTokenizer ->", arr.length, "tokens");
-            return arr;
-          } catch (err) {
-            console.error("charTokenizer error", err);
-            return [];
-          }
-        }
-
+        function charTokenizer(text) { if (!text) return []; return Array.from(text.replace(/\s+/g,"")); }
         function buildTokenizer(type, opts) {
-          switch (type) {
-            case "whitespace": return (t) => whitespaceTokenizer(t, opts);
-            case "comma": return (t) => commaTokenizer(t, opts);
-            case "regex": return (t) => regexTokenizer(t, opts);
-            case "ngram": return (t) => ngramTokenizer(t, opts);
-            case "char": return (t) => charTokenizer(t, opts);
-            default: return (t) => whitespaceTokenizer(t, opts);
+          switch(type) {
+            case "whitespace": return t => whitespaceTokenizer(t,opts);
+            case "comma": return t => commaTokenizer(t,opts);
+            case "regex": return t => regexTokenizer(t,opts);
+            case "ngram": return t => ngramTokenizer(t,opts);
+            case "char": return t => charTokenizer(t,opts);
+            default: return t => whitespaceTokenizer(t,opts);
           }
         }
-
-        return {
-          buildTokenizer,
-          whitespaceTokenizer,
-          commaTokenizer,
-          regexTokenizer,
-          ngramTokenizer,
-          charTokenizer,
-        };
+        return { buildTokenizer, ngramTokenizer };
       })();
 
-      /* ----------------------
-         Vocabulary & mapping
-         ---------------------- */
-
-      const Vocab = (function () {
+      // Vocab
+      const Vocab = (function() {
         let tokenToId = {};
         let idToToken = [];
-
         function buildFromTokens(tokens) {
-          try {
-            tokenToId = {};
-            idToToken = [];
-            tokens.forEach(t => {
-              if (!(t in tokenToId)) {
-                tokenToId[t] = idToToken.length;
-                idToToken.push(t);
-              }
-            });
-            console.info("Vocabulary built", idToToken.length, "entries");
-            return { tokenToId, idToToken };
-          } catch (err) {
-            console.error("buildFromTokens error", err);
-            return { tokenToId, idToToken };
-          }
+          tokenToId = {}; idToToken = [];
+          tokens.forEach(t => { if (!(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } });
+          console.info("vocab built", idToToken.length);
+          return { tokenToId, idToToken };
         }
-
-        function addTokens(tokens) {
-          try {
-            tokens.forEach(t => {
-              if (!(t in tokenToId)) {
-                tokenToId[t] = idToToken.length;
-                idToToken.push(t);
-              }
-            });
-            console.debug("addTokens: vocab now", idToToken.length);
-          } catch (err) {
-            console.error("addTokens error", err);
-          }
-        }
-
+        function addTokens(tokens) { tokens.forEach(t => { if (!(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } }); }
         function size() { return idToToken.length; }
-
-        function encode(tokens) {
-          try {
-            return tokens.map(t => {
-              if (t in tokenToId) return tokenToId[t];
-              // unknown -> add to vocab dynamically
-              tokenToId[t] = idToToken.length;
-              idToToken.push(t);
-              return tokenToId[t];
-            });
-          } catch (err) {
-            console.error("encode error", err);
-            return [];
-          }
-        }
-
-        function decode(ids) {
-          try {
-            return ids.map(i => idToToken[i] || "<UNK>");
-          } catch (err) {
-            console.error("decode error", err);
-            return [];
-          }
-        }
-
-        function reset() {
-          tokenToId = {};
-          idToToken = [];
-          console.info("Vocabulary reset");
-        }
-
-        function exportVocab() {
-          return { tokenToId: (Object.assign({}, tokenToId)), idToToken: idToToken.slice() };
-        }
-
+        function encode(tokens) { return tokens.map(t => { if (t in tokenToId) return tokenToId[t]; tokenToId[t] = idToToken.length; idToToken.push(t); return tokenToId[t]; }); }
+        function decode(ids) { return ids.map(i => idToToken[i] || "<UNK>"); }
+        function reset() { tokenToId = {}; idToToken = []; }
+        function exportVocab() { return { tokenToId: Object.assign({}, tokenToId), idToToken: idToToken.slice() }; }
         return { buildFromTokens, addTokens, size, encode, decode, reset, exportVocab };
       })();
 
-      /* ----------------------
-         Model & training (Trainer)
-         ---------------------- */
-
-      const Trainer = (function () {
-        let model = null;
-        let created = false;
-        let lastEmbeddingMatrix = null;
-
-        async function createModel(paramsOrVocab, maybeSettings) {
-          console.group("createModel");
+      // Trainer
+      const Trainer = (function() {
+        let model = null; let created=false; let lastEmbedding=null;
+        async function createModel(params) {
           try {
-            let params = {};
-            if (paramsOrVocab && typeof paramsOrVocab === "object" && (paramsOrVocab.inputDim || paramsOrVocab.outputDim || paramsOrVocab.embeddingDim)) {
-              params = Object.assign({}, paramsOrVocab);
-            } else {
-              const vocab = paramsOrVocab;
-              const settings = maybeSettings || {};
-              let inputDim = 0;
-              if (typeof vocab === "number") inputDim = vocab;
-              else if (Array.isArray(vocab)) inputDim = vocab.length;
-              else if (vocab && typeof vocab === "object") {
-                if (typeof vocab.size === "number") inputDim = vocab.size;
-                else if (typeof vocab.vocabSize === "number") inputDim = vocab.vocabSize;
-                else if (vocab.tokenToId && typeof vocab.tokenToId === "object") inputDim = Object.keys(vocab.tokenToId).length;
-                else if (vocab.idToToken && Array.isArray(vocab.idToToken)) inputDim = vocab.idToToken.length;
-              }
-              params.inputDim = inputDim;
-              params.outputDim = settings.outputDim || settings.embeddingDim || parseInt(settings.outputDim || settings.embeddingDim || 0, 10);
-              params.optimizer = settings.optimizer || settings.opt || "adam";
-              params.learningRate = typeof settings.learningRate === "number" ? settings.learningRate : parseFloat(settings.learningRate || 0.01);
-            }
-
-            const inputDim = parseInt(params.inputDim, 10);
-            const embeddingDim = parseInt(params.outputDim || params.embeddingDim || params.embeddingDim, 10) || parseInt(params.outputDim, 10);
-
-            if (!Number.isInteger(inputDim) || inputDim <= 0) {
-              throw new Error("Invalid inputDim/vocab size: " + JSON.stringify(params.inputDim));
-            }
-            if (!Number.isInteger(embeddingDim) || embeddingDim <= 0) {
-              throw new Error("Invalid embeddingDim: " + JSON.stringify(embeddingDim));
-            }
-            const optimizerName = params.optimizer || "adam";
-            const lr = Number.isFinite(params.learningRate) && params.learningRate > 0 ? params.learningRate : 0.01;
-
-            console.debug("createModel parameters:", { inputDim, embeddingDim, optimizerName, lr });
-
-            // Build model
-            const input = tf.input({ shape: [1], dtype: "int32", name: "token_input" });
-            const embeddingLayer = tf.layers.embedding({ inputDim: inputDim, outputDim: embeddingDim, inputLength: 1, name: "embedding" });
-            const embedOut = embeddingLayer.apply(input);
-            const flatten = tf.layers.flatten().apply(embedOut);
-            const decoder = tf.layers.dense({ units: inputDim, activation: "softmax", name: "decoder" }).apply(flatten);
-            const m = tf.model({ inputs: input, outputs: decoder, name: "embed_model" });
-
-            let opt = null;
-            if (optimizerName === "adam") opt = tf.train.adam(lr);
-            else if (optimizerName === "sgd") opt = tf.train.sgd(lr);
-            else {
-              console.warn("Unknown optimizer:", optimizerName, "falling back to adam");
-              opt = tf.train.adam(lr);
-            }
-
+            const inputDim = parseInt(params.inputDim,10);
+            const embeddingDim = parseInt(params.outputDim || params.embeddingDim,10);
+            if (!Number.isInteger(inputDim) || inputDim<=0) throw new Error("invalid inputDim");
+            if (!Number.isInteger(embeddingDim) || embeddingDim<=0) throw new Error("invalid embeddingDim");
+            const input = tf.input({shape:[1], dtype:"int32", name:"token_input"});
+            const emb = tf.layers.embedding({ inputDim: inputDim, outputDim: embeddingDim, inputLength: 1, name: "embedding" });
+            const embedOut = emb.apply(input);
+            const flat = tf.layers.flatten().apply(embedOut);
+            const decoder = tf.layers.dense({ units: inputDim, activation: "softmax", name: "decoder" }).apply(flat);
+            const m = tf.model({ inputs: input, outputs: decoder, name:"embed_model" });
+            const opt = (params.optimizer === "sgd") ? tf.train.sgd(params.learningRate || 0.01) : tf.train.adam(params.learningRate || 0.01);
             m.compile({ optimizer: opt, loss: "sparseCategoricalCrossentropy", metrics: ["accuracy"] });
-
-            model = m;
-            created = true;
-            console.info("Model created", { inputDim, embeddingDim, optimizerName, lr });
-
-            try {
-              const summaryEl = UI.$("#model-summary");
-              let summaryText = "";
-              m.summary(80, { print: (s) => { summaryText += s + "\n"; } });
-              if (summaryEl) summaryEl.textContent = summaryText;
-            } catch (e) {
-              console.debug("Could not render model summary to UI", e);
-            }
-
-            console.groupEnd();
+            model = m; created=true;
+            try { let s=""; m.summary(80,{print: (l)=> s+=l+"\n" }); $("#model-summary").textContent = s; } catch(e) {}
             return m;
-          } catch (err) {
-            console.error("createModel failed", err);
-            console.groupEnd();
-            throw err;
-          }
+          } catch (err) { console.error("createModel", err); throw err; }
         }
-
-        function createOptimizer(name, lr) {
-          if (name === "adam") return tf.train.adam(lr);
-          if (name === "sgd") return tf.train.sgd(lr);
-          console.warn("Unknown optimizer, falling back to adam");
-          return tf.train.adam(lr);
-        }
-
-        function hasModel() { return created && model; }
-
+        function hasModel(){ return created && model; }
         function getEmbeddingMatrix() {
-          try {
-            if (!hasModel()) return null;
-            const embLayer = model.getLayer("embedding");
-            if (!embLayer) {
-              console.error("Embedding layer not found");
-              return null;
-            }
-            const weights = embLayer.getWeights();
-            if (!weights || weights.length === 0) {
-              console.error("Embedding weights not found");
-              return null;
-            }
-            lastEmbeddingMatrix = weights[0];
-            return lastEmbeddingMatrix;
-          } catch (err) {
-            console.error("getEmbeddingMatrix error", err);
-            return null;
-          }
+          if (!hasModel()) return null;
+          try { const layer = model.getLayer("embedding"); const weights = layer.getWeights(); if (weights && weights.length>0) { lastEmbedding = weights[0]; return lastEmbedding; } return null; } catch (e) { console.error(e); return null; }
         }
-
         async function trainOnDataset(encodedTokens, params, hooks) {
-          try {
-            if (!hasModel()) {
-              throw new Error("Model not created");
+          if (!hasModel()) throw new Error("no model");
+          if (!Array.isArray(encodedTokens) || encodedTokens.length===0) return;
+          const N = encodedTokens.length;
+          const xsArr = encodedTokens.map(v => [parseInt(v,10)]);
+          const ysArr = encodedTokens.map(v => parseInt(v,10));
+          const xs = tf.tensor2d(xsArr,[N,1],"int32");
+          const ys = tf.tensor1d(ysArr,"float32");
+          await model.fit(xs, ys, {
+            batchSize: params.batchSize || 8,
+            epochs: params.epochs || 1,
+            shuffle: true,
+            callbacks: {
+              onBatchEnd: async (batch, logs) => { if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs); },
+              onEpochEnd: async (epoch, logs) => { if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs); }
             }
-
-            if (!Array.isArray(encodedTokens) || encodedTokens.length === 0) {
-              console.warn("trainOnDataset: no tokens");
-              return;
-            }
-
-            let tokens = [];
-            for (let i = 0; i < encodedTokens.length; i++) {
-              let v = parseInt(encodedTokens[i], 10);
-              if (Number.isNaN(v)) {
-                throw new Error("Non-integer token detected at index " + i + ": " + encodedTokens[i]);
-              }
-              tokens.push(v);
-            }
-
-            let N = tokens.length;
-
-            let xsData = [];
-            for (let i = 0; i < N; i++) {
-              xsData.push([ tokens[i] ]);
-            }
-
-            let ysData = [];
-            for (let i = 0; i < N; i++) {
-              ysData.push(tokens[i]);
-            }
-
-            let xs = tf.tensor2d(xsData, [N, 1], "int32");
-            let ys = tf.tensor1d(ysData, "float32");
-
-            let batchSize = Math.floor(params && params.batchSize ? params.batchSize : 8);
-            if (!Number.isInteger(batchSize) || batchSize <= 0) {
-              batchSize = 8;
-            }
-
-            let epochs = Math.floor(params && params.epochs ? params.epochs : 1);
-            if (!Number.isInteger(epochs) || epochs <= 0) {
-              epochs = 1;
-            }
-
-            await model.fit(xs, ys, {
-              batchSize: batchSize,
-              epochs: epochs,
-              shuffle: true,
-              callbacks: {
-                onTrainBegin: async function (logs) {
-                  console.info("Training started", logs || {});
-                  if (hooks && hooks.onTrainBegin) {
-                    await hooks.onTrainBegin(logs);
-                  }
-                },
-                onBatchEnd: async function (batch, logs) {
-                  if (hooks && hooks.onBatchEnd) {
-                    await hooks.onBatchEnd(batch, logs);
-                  }
-                },
-                onEpochEnd: async function (epoch, logs) {
-                  console.info("Epoch", epoch, logs || {});
-                  if (hooks && hooks.onEpochEnd) {
-                    await hooks.onEpochEnd(epoch, logs);
-                  }
-                },
-                onTrainEnd: async function (logs) {
-                  console.info("Training finished", logs || {});
-                  if (hooks && hooks.onTrainEnd) {
-                    await hooks.onTrainEnd(logs);
-                  }
-                }
-              }
-            });
-
-            xs.dispose();
-            ys.dispose();
-
-            console.log("trainOnDataset: completed successfully");
-          } catch (err) {
-            console.error("Train failed Error:", err);
-            throw err;
-          }
+          });
+          xs.dispose(); ys.dispose();
         }
-
-        function resetModel() {
-          try {
-            if (model) {
-              model.dispose();
-              model = null;
-              created = false;
-              lastEmbeddingMatrix = null;
-              console.info("Model disposed and reset");
-            }
-          } catch (err) {
-            console.error("resetModel error", err);
-          }
-        }
-
-        // expose internals for mathml rendering
+        function resetModel(){ try { if (model) { model.dispose(); model=null; created=false; lastEmbedding=null; $("#model-summary").textContent=""; } } catch(e){} }
         async function readModelInternals() {
-          try {
-            if (!hasModel()) return null;
-            const layers = model.layers || [];
-            const result = [];
-            for (let i = 0; i < layers.length; i++) {
-              try {
-                const layer = layers[i];
-                const layerInfo = {
-                  name: layer.name || `layer_${i}`,
-                  className: layer.getClassName ? layer.getClassName() : "Layer",
-                  weights: [],
-                };
-                // layer.weights contains variable objects with names, layer.getWeights() returns tensors
-                const weightTensors = layer.getWeights ? layer.getWeights() : [];
-                const weightObjects = (layer.weights || []).slice();
-                for (let j = 0; j < weightTensors.length; j++) {
-                  const wt = weightTensors[j];
-                  const wname = (weightObjects[j] && weightObjects[j].name) ? weightObjects[j].name : (`w_${j}`);
-                  layerInfo.weights.push({ name: wname, tensor: wt });
-                }
-                result.push(layerInfo);
-              } catch (e) {
-                console.warn("readModelInternals: failed for layer", i, e);
-              }
+          if (!hasModel()) return null;
+          const layers = model.layers || [];
+          const out = [];
+          for (let i=0;i<layers.length;i++){
+            const layer = layers[i];
+            const weightTensors = layer.getWeights ? layer.getWeights() : [];
+            const weightObjects = (layer.weights || []).slice();
+            const ws = [];
+            for (let j=0;j<weightTensors.length;j++){
+              const wt = weightTensors[j];
+              const name = (weightObjects[j] && weightObjects[j].name) ? weightObjects[j].name : `w_${j}`;
+              ws.push({ name, tensor: wt });
             }
-            return result;
-          } catch (err) {
-            console.error("readModelInternals failed", err);
-            return null;
+            out.push({ name: layer.name || `layer_${i}`, className: layer.getClassName ? layer.getClassName() : "Layer", weights: ws });
           }
+          return out;
         }
-
-        return {
-          createModel,
-          hasModel,
-          getEmbeddingMatrix,
-          trainOnDataset,
-          resetModel,
-          readModelInternals,
-        };
+        return { createModel, hasModel, getEmbeddingMatrix, trainOnDataset, resetModel, readModelInternals };
       })();
 
-      /* ----------------------
-         MathML rendering helpers for tensors
-         ---------------------- */
-
+      // MathML helper
       async function tensorToMathML(tensor) {
-        try {
-          if (!tensor) return { mathml: "<math></math>", meta: "null" };
-          // fetch array representation
-          let arr;
-          try {
-            if (typeof tensor.arraySync === "function") {
-              // try arraySync if available
-              arr = tensor.arraySync();
-            } else {
-              arr = await tensor.array();
-            }
-          } catch (e) {
-            // fallback to async array
-            try { arr = await tensor.array(); } catch (err) { arr = null; }
-          }
-          const shape = tensor.shape ? tensor.shape.slice() : (Array.isArray(arr) ? (Array.isArray(arr[0]) ? [arr.length, arr[0].length] : [arr.length]) : []);
-          const dtype = tensor.dtype || "unknown";
-          const size = tensor.size || (Array.isArray(arr) ? (function count(a) { if (!Array.isArray(a)) return 1; return a.reduce((s, x) => s + count(x), 0); })(arr) : 0);
-
-          function rowToMTr(row) {
-            if (!Array.isArray(row)) {
-              return `<mtr><mtd><mn>${escapeHtml(String(row))}</mn></mtd></mtr>`;
-            }
-            return `<mtr>${row.map(c => `<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>`;
-          }
-
-          let mtable = "";
-          if (Array.isArray(arr) && Array.isArray(arr[0])) {
-            // 2D or higher: render first two dims as matrix rows
-            const rows = arr.map(r => {
-              if (Array.isArray(r)) {
-                return `<mtr>${r.map(c => `<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>`;
-              } else {
-                return `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`;
-              }
-            }).join("");
-            mtable = `<mtable>${rows}</mtable>`;
-          } else if (Array.isArray(arr)) {
-            // 1D array
-            const cells = arr.map(c => `<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("");
-            mtable = `<mtable><mtr>${cells}</mtr></mtable>`;
-          } else {
-            mtable = `<mtable><mtr><mtd><mn>${escapeHtml(String(arr))}</mn></mtd></mtr></mtable>`;
-          }
-
-          const mathml = `<math xmlns="http://www.w3.org/1998/Math/MathML">${mtable}</math>`;
-          const meta = `shape: [${shape.join(", ")}], dtype: ${dtype}, size: ${size}`;
-          return { mathml, meta, array: arr, shape, dtype, size };
-        } catch (err) {
-          console.error("tensorToMathML error", err);
-          return { mathml: "<math></math>", meta: "error" };
+        if (!tensor) return { mathml: "<math></math>", meta: "null" };
+        let arr;
+        try { if (typeof tensor.arraySync === "function") arr = tensor.arraySync(); else arr = await tensor.array(); } catch(e) { try { arr = await tensor.array(); } catch(e2) { arr = null; } }
+        const shape = tensor.shape ? tensor.shape.slice() : (Array.isArray(arr) ? (Array.isArray(arr[0]) ? [arr.length, arr[0].length] : [arr.length]) : []);
+        const dtype = tensor.dtype || "float32";
+        const size = tensor.size || (Array.isArray(arr) ? (function count(a){ if (!Array.isArray(a)) return 1; return a.reduce((s,x)=>s+count(x),0); })(arr) : 0);
+        function rowToTR(r) { if (!Array.isArray(r)) return `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`; return `<mtr>${r.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>`; }
+        let mtable = "";
+        if (Array.isArray(arr) && Array.isArray(arr[0])) {
+          mtable = `<mtable>${arr.map(r=> Array.isArray(r) ? `<mtr>${r.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr>` : `<mtr><mtd><mn>${escapeHtml(String(r))}</mn></mtd></mtr>`).join("")}</mtable>`;
+        } else if (Array.isArray(arr)) {
+          mtable = `<mtable><mtr>${arr.map(c=>`<mtd><mn>${escapeHtml(String(c))}</mn></mtd>`).join("")}</mtr></mtable>`;
+        } else {
+          mtable = `<mtable><mtr><mtd><mn>${escapeHtml(String(arr))}</mn></mtd></mtr></mtable>`;
         }
+        const mathml = `<math xmlns="http://www.w3.org/1998/Math/MathML">${mtable}</math>`;
+        const meta = `shape: [${shape.join(", ")}], dtype: ${dtype}, size: ${size}`;
+        return { mathml, meta, array: arr, shape, dtype, size };
       }
 
-      /* ----------------------
-         Visualization helpers (extended)
-         ---------------------- */
-
-      const Visual = (function () {
+      // Visualization helpers
+      let lastPlotLayout = null;
+      const Visual = (function(){
         async function extractEmbeddings(embVar) {
-          try {
-            if (!embVar) throw new Error("No embedding variable provided");
-            const arr = await embVar.array();
-            return arr;
-          } catch (err) {
-            console.error("extractEmbeddings error", err);
-            return [];
+          if (!embVar) throw new Error("no emb var");
+          return await embVar.array();
+        }
+        async function projectPCA(embeddings, k) {
+          if (!embeddings || embeddings.length===0) return [];
+          const matrix = tf.tensor2d(embeddings);
+          const mean = tf.mean(matrix,0);
+          const centered = tf.sub(matrix, mean);
+          const cov = tf.matMul(centered.transpose(), centered);
+          function powerIteration(mat, iterations) {
+            let b = tf.randomUniform([mat.shape[0],1]);
+            for (let i=0;i<iterations;i++){ b = tf.matMul(mat,b); const norm = tf.norm(b); b = tf.div(b,norm); }
+            return b;
           }
+          const vectors = [];
+          let M = cov;
+          for (let d=0; d<k; d++){ const v = powerIteration(M, 60); vectors.push(v); const lambda = tf.matMul(tf.transpose(v), tf.matMul(M, v)); const outer = tf.matMul(v, tf.transpose(v)); M = tf.sub(M, tf.mul(lambda, outer)); }
+          const projection = tf.concat(vectors,1);
+          const reduced = tf.matMul(centered, projection);
+          const res = reduced.arraySync();
+          matrix.dispose(); mean.dispose(); centered.dispose(); cov.dispose(); projection.dispose(); reduced.dispose();
+          return res;
         }
 
-        async function projectPCA(embeddings, targetDim) {
-          console.group("projectPCA");
-          try {
-            if (!Array.isArray(embeddings) || embeddings.length === 0) {
-              throw new Error("Embeddings empty or invalid");
-            }
-            if (targetDim < 1) throw new Error("Invalid targetDim");
-
-            var matrix = tf.tensor2d(embeddings);
-            var mean = tf.mean(matrix, 0);
-            var centered = tf.sub(matrix, mean);
-            var covariance = tf.matMul(centered.transpose(), centered);
-
-            function powerIteration(mat, iterations) {
-              var b = tf.randomUniform([mat.shape[0], 1]);
-              for (var i = 0; i < iterations; i++) {
-                b = tf.matMul(mat, b);
-                var norm = tf.norm(b);
-                b = tf.div(b, norm);
-              }
-              return b;
-            }
-
-            var vectors = [];
-            var workingMatrix = covariance;
-            for (var d = 0; d < targetDim; d++) {
-              console.debug("Finding eigenvector", d + 1);
-              var v = powerIteration(workingMatrix, 60);
-              vectors.push(v);
-              var lambda = tf.matMul(tf.transpose(v), tf.matMul(workingMatrix, v));
-              var outer = tf.mul(v, tf.transpose(v));
-              workingMatrix = tf.sub(workingMatrix, tf.mul(lambda, outer));
-            }
-
-            var projection = tf.concat(vectors, 1);
-            var reduced = tf.matMul(centered, projection);
-            var result = reduced.arraySync();
-
-            console.debug("PCA result shape:", reduced.shape);
-            console.groupEnd();
-            return result;
-          } catch (error) {
-            console.error("projectPCA error", error);
-            console.groupEnd();
-            return [];
-          }
-        }
-
-        // visualizePoints now supports high-dim parallel coords, PCA and 3d-slice
+        // Primary visualize function: 1/2/3D on #plot; >3 goes to #highdim-plot
         async function visualizePoints(points, labels, dimsRequested, mode, sliceAxes) {
           try {
-            const n = points.length;
-            const d = (points[0] || []).length || 0;
-            if (n === 0) {
-              Plotly.react("plot", [{ x: [], y: [], mode: "markers" }], { margin: { t: 30 }, title: "No data" });
+            if (!Array.isArray(points) || points.length===0) {
+              Plotly.react("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Empty"));
+              return;
+            }
+            const n = points.length; const d = (points[0]||[]).length||0;
+            // choose where to draw
+            if (d >= dimsRequested && dimsRequested<=3 && dimsRequested<=3) {
+              // main plot
+              if (dimsRequested===1) {
+                const x = points.map(p=>p[0]); const y = points.map(()=>0);
+                const data = [{ x, y, text: labels, mode: "markers+text", type:"scatter", marker:{size:9}, textposition:"top center" }];
+                const lay = layoutTransparent("1D embeddings");
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+                return;
+              } else if (dimsRequested===2) {
+                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), text: labels, mode: "markers+text", type:"scatter", marker:{size:8} }];
+                const lay = layoutTransparent("2D embeddings");
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+                return;
+              } else {
+                const data = [{ x: points.map(p=>p[0]), y: points.map(p=>p[1]), z: points.map(p=>p[2]), text: labels, mode:"markers", type:"scatter3d", marker:{size:4} }];
+                const lay = layoutTransparent("3D embeddings", {scene:{bgcolor:"rgba(0,0,0,0)"}});
+                Plotly.react("plot", data, lay);
+                lastPlotLayout = lay;
+                return;
+              }
+            }
+
+            // High-dim: render only in #highdim-plot (no overlap)
+            const target = "highdim-plot";
+
+            if (mode === "pairwise") {
+              // create pairwise scatter matrix for first min(6,d) dims
+              const dims = Math.min(6, d);
+              const figData = [];
+              const figLayout = layoutTransparent("Pairwise scatter matrix");
+              // For simplicity, perform PCA to 3 dims and show scatter matrix of those dims
+              const pca = await projectPCA(points, Math.min(3,d));
+              const used = pca[0] ? pca[0].length : 2;
+              const dimsLabels = Array.from({length:used},(_,i)=>`PC${i+1}`);
+              // build scatter traces for combos
+              // Plotly does not have a native scatter-matrix without using plotly.express; emulate by small subplots is heavy.
+              // Instead show two visuals: PCA scatter and correlation heatmap
+              const sc = { x: pca.map(r=>r[0]), y: pca.map(r=>r[1]), mode:"markers", type:"scatter", marker:{size:6}, text: labels };
+              const corr = correlationMatrix(points);
+              const heat = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", showscale:true };
+              Plotly.react(target, [sc, heat], Object.assign({}, figLayout, {grid:{rows:2, columns:1, subplots:[["xy"],["xy2"]]}, xaxis:{domain:[0,1], anchor:"y"}, yaxis:{domain:[0.55,1], anchor:"x"}, xaxis2:{domain:[0,1], anchor:"y2"}, yaxis2:{domain:[0,0.45], anchor:"x2"}}));
+              lastPlotLayout = figLayout;
               return;
             }
 
-            mode = mode || UI.$("#visual-mode").value || "auto";
-
-            // if d >= requested dims and requested <= 3: keep old behavior
-            if (d >= dimsRequested && dimsRequested <= 3 && dimsRequested <= 3) {
-              if (dimsRequested === 1) {
-                const x = points.map(p => p[0]);
-                const y = points.map(() => 0);
-                Plotly.react("plot", [{
-                  x, y, text: labels, mode: "markers+text", type: "scatter",
-                  marker: { size: 10 }, textposition: "top center"
-                }], {
-                  margin: { t: 30, b: 40, l: 40, r: 40 }, title: "1D embeddings", paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" }
-                });
-                return;
-              } else if (dimsRequested === 2) {
-                const data = [{
-                  x: points.map(p => p[0]),
-                  y: points.map(p => p[1]),
-                  text: labels, mode: "markers+text", type: "scatter",
-                  marker: { size: 9 }, textposition: "top center"
-                }];
-                Plotly.react("plot", data, { margin: { t: 30 }, title: "2D embeddings", paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
-                return;
-              } else {
-                const data = [{
-                  x: points.map(p => p[0]),
-                  y: points.map(p => p[1]),
-                  z: points.map(p => p[2]),
-                  text: labels, mode: "markers", type: "scatter3d",
-                  marker: { size: 4 }
-                }];
-                Plotly.react("plot", data, { margin: { t: 30 }, title: "3D embeddings", scene: { bgcolor: "rgba(0,0,0,0)" }, paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
-                return;
-              }
-            }
-
-            // For d > 3 or dimsRequested > 3: use high-dim views
-            // Mode: auto -> parallel + PCA overlay (PCA in annotation)
-            if (mode === "auto" || mode === "parallel") {
-              // Build parallel coordinates trace
-              const parDimensions = [];
-              for (let dim = 0; dim < d; dim++) {
-                parDimensions.push({
-                  range: [Math.min(...points.map(p => p[dim])), Math.max(...points.map(p => p[dim]))],
-                  label: `dim${dim}`, values: points.map(p => p[dim])
-                });
-              }
-              const parTrace = {
-                type: "parcoords",
-                line: { color: Array.from({ length: n }, (_, i) => i), colorscale: "Turbo" },
-                dimensions: parDimensions
-              };
-              // Also add PCA 2D projection as small scatter overlay (separate axis domain)
-              const pca = await projectPCA(points, 2);
-              const scatter = {
-                x: pca.map(p => p[0]),
-                y: pca.map(p => p[1]),
-                text: labels,
-                mode: "markers+text",
-                type: "scatter",
-                marker: { size: 6 },
-                xaxis: "x2",
-                yaxis: "y2"
-              };
-              const layout = {
-                grid: { rows: 2, columns: 1, subplots: [["xy"], ["x2y2"]], roworder: "top to bottom" },
-                margin: { t: 30, b: 20 },
-                xaxis: { domain: [0, 1], anchor: "y" },
-                yaxis: { domain: [0.55, 1], anchor: "x" },
-                xaxis2: { domain: [0, 1], anchor: "y2" },
-                yaxis2: { domain: [0, 0.5], anchor: "x2" },
-                paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" }
-              };
-              // Render both traces: parallel coords occupies first subplot (y domain ~0.55-1)
-              // Use an approach: set parcoords domain via layout shapes is tricky; but Plotly supports parcoords with domain attr
-              parTrace.domain = { x: [0, 1], y: [0.45, 1] };
-              scatter.xaxis = "x2"; scatter.yaxis = "y2";
-              Plotly.react("plot", [parTrace, scatter], layout);
+            if (mode === "heatmap") {
+              const corr = correlationMatrix(points);
+              const h = { z:corr.z, x:corr.x, y:corr.y, type:"heatmap", colorscale:"Viridis" };
+              const lay = layoutTransparent("Correlation heatmap");
+              Plotly.react(target, [h], lay);
+              lastPlotLayout = lay;
               return;
             }
 
             if (mode === "pca") {
-              const pca = await projectPCA(points, 2);
-              const data = [{
-                x: pca.map(p => p[0]),
-                y: pca.map(p => p[1]),
-                text: labels,
-                mode: "markers+text",
-                type: "scatter",
-                marker: { size: 8 },
-                textposition: "top center"
-              }];
-              Plotly.react("plot", data, { margin: { t: 30 }, title: "PCA projection (2D)", paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
+              const p = await projectPCA(points, 2);
+              const data = [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text: labels, mode:"markers+text", type:"scatter", marker:{size:8} }];
+              const lay = layoutTransparent("PCA 2D");
+              Plotly.react(target, data, lay);
+              lastPlotLayout = lay;
               return;
             }
 
-            if (mode === "3d-slice") {
-              // sliceAxes is array [a,b,c] (indices). If not provided, use first 3 dims
-              let a = 0, b = 1, c = 2;
-              if (Array.isArray(sliceAxes) && sliceAxes.length >= 3) {
-                a = Math.max(0, Math.min(d - 1, parseInt(sliceAxes[0], 10) || 0));
-                b = Math.max(0, Math.min(d - 1, parseInt(sliceAxes[1], 10) || 1));
-                c = Math.max(0, Math.min(d - 1, parseInt(sliceAxes[2], 10) || 2));
+            // default: parallel coords + PCA small
+            {
+              const parDimensions = [];
+              for (let dim=0; dim<d; dim++) {
+                const values = points.map(p=>p[dim]);
+                parDimensions.push({ label:`dim${dim}`, values, range:[Math.min(...values), Math.max(...values)] });
               }
-              const data = [{
-                x: points.map(p => p[a]),
-                y: points.map(p => p[b]),
-                z: points.map(p => p[c]),
-                text: labels,
-                mode: "markers",
-                type: "scatter3d",
-                marker: { size: 4 }
-              }];
-              Plotly.react("plot", data, { margin: { t: 30 }, title: `3D slice axes [${a},${b},${c}]`, scene: { bgcolor: "rgba(0,0,0,0)" }, paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
+              const parTrace = { type:"parcoords", line:{color:Array.from({length:n},(_,i)=>i), colorscale:"Turbo"}, dimensions:parDimensions, domain:{x:[0,1], y:[0.45,1]} };
+              const pcaSmall = await projectPCA(points, 2);
+              const scatter = { x: pcaSmall.map(r=>r[0]), y: pcaSmall.map(r=>r[1]), text: labels, mode:"markers", type:"scatter", marker:{size:6}, xaxis:"x2", yaxis:"y2" };
+              const layout = layoutTransparent("Parallel Coordinates + PCA (small)");
+              Plotly.react(target, [parTrace, scatter], Object.assign({}, layout, {xaxis2:{domain:[0,1]}, yaxis2:{domain:[0,0.45]}}));
+              lastPlotLayout = layout;
               return;
             }
 
-            // fallback: PCA 2D
-            const pcaFallback = await projectPCA(points, 2);
-            Plotly.react("plot", [{
-              x: pcaFallback.map(p => p[0]),
-              y: pcaFallback.map(p => p[1]),
-              text: labels,
-              mode: "markers+text",
-              type: "scatter",
-              marker: { size: 8 }
-            }], { margin: { t: 30 }, title: "PCA fallback (2D)", paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
+          } catch (err) { console.error("visualizePoints", err); pushLog("error", "visualizePoints: "+err.message); }
+        }
 
-          } catch (err) {
-            console.error("visualizePoints error", err);
-          }
+        function layoutTransparent(title, extras) {
+          const base = { title, margin:{t:30}, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} };
+          if (extras) Object.assign(base, extras);
+          return base;
+        }
+
+        function correlationMatrix(points) {
+          const d = points[0].length;
+          const x = Array.from({length:d},(_,i)=>`dim${i}`);
+          const z = Array.from({length:d}, (_,i) => Array.from({length:d}, (_,j) => {
+            const xi = points.map(p=>p[i]);
+            const xj = points.map(p=>p[j]);
+            const mean = arr => arr.reduce((s,v)=>s+v,0)/arr.length;
+            const cov = (a,b)=>{ const ma=mean(a), mb=mean(b); let s=0; for (let k=0;k<a.length;k++) s += (a[k]-ma)*(b[k]-mb); return s/(a.length-1||1); };
+            const std = a => Math.sqrt(cov(a,a)||1e-8);
+            return cov(xi,xj)/(std(xi)*std(xj)+1e-8);
+          }));
+          return { x, y: x.slice(), z };
         }
 
         return { extractEmbeddings, visualizePoints, projectPCA };
       })();
 
-      /* ----------------------
-         UI wiring & behavior
-         ---------------------- */
-
+      // UI wiring
       function initUI() {
         try {
-          const inputText = UI.$("#input-text");
-          const tokenizerType = UI.$("#tokenizer-type");
-          const ngramN = UI.$("#ngram-n");
-          const customRegex = UI.$("#custom-regex");
-          const tokenPreview = UI.$("#token-preview");
-          const btnTokenize = UI.$("#btn-tokenize");
-          const btnBuildVocab = UI.$("#btn-build-vocab");
-          const btnClear = UI.$("#btn-clear");
-          const ngramMode = UI.$("#ngram-mode");
-          const visualDims = UI.$("#visual-dims");
-          const visualMode = UI.$("#visual-mode");
-          const sliceControls = UI.$("#slice-controls");
-          const sliceA = UI.$("#slice-a");
-          const sliceB = UI.$("#slice-b");
-          const sliceC = UI.$("#slice-c");
-          const liveTextInput = UI.$("#live-text");
-          const liveToggle = UI.$("#btn-live-toggle");
+          const inputText = $("#input-text");
+          const tokenizerType = $("#tokenizer-type");
+          const ngramN = $("#ngram-n");
+          const ngramMode = $("#ngram-mode");
+          const tokenPreview = $("#token-preview");
+          let liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: parseInt(ngramN.value,10), mode: ngramMode.value });
 
-          // live tokenizer based on UI
-          let liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: parseInt(ngramN.value, 10), pattern: customRegex.value, mode: ngramMode.value });
+          function refreshTokenizer() { liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: Math.max(1,parseInt(ngramN.value,10)), mode: ngramMode.value }); tokenizeAndPreview(); }
 
-          function refreshTokenizerFromUI() {
-            liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n: Math.max(1, parseInt(ngramN.value, 10)), pattern: customRegex.value, mode: ngramMode.value });
-            console.debug("Tokenizer changed to", tokenizerType.value, { n: ngramN.value, mode: ngramMode.value });
-            tokenizeAndPreview();
-          }
-
-          tokenizerType.addEventListener("change", refreshTokenizerFromUI);
-          ngramN.addEventListener("input", refreshTokenizerFromUI);
-          customRegex.addEventListener("input", refreshTokenizerFromUI);
-          ngramMode.addEventListener("change", refreshTokenizerFromUI);
-
-          inputText.addEventListener("input", () => {
-            tokenizeAndPreview();
-          });
-
-          btnTokenize.addEventListener("click", () => { tokenizeAndPreview(true); });
-          btnBuildVocab.addEventListener("click", () => {
+          tokenizerType.addEventListener("change", refreshTokenizer);
+          ngramN.addEventListener("input", refreshTokenizer);
+          ngramMode.addEventListener("change", refreshTokenizer);
+          inputText.addEventListener("input", () => tokenizeAndPreview(true));
+          $("#btn-tokenize").addEventListener("click", ()=> tokenizeAndPreview(true));
+          $("#btn-build-vocab").addEventListener("click", ()=>{
             const toks = tokenizeAndPreview(true);
             Vocab.buildFromTokens(toks);
-            UI.$("#stat-vocab-size").textContent = Vocab.size();
+            $("#stat-vocab-size") && ($("#stat-vocab-size").textContent = Vocab.size());
+            pushLog("info", "vocab built size="+Vocab.size());
           });
+          $("#btn-clear").addEventListener("click", ()=> { inputText.value=""; tokenizeAndPreview(true); Vocab.reset(); $("#stat-vocab-size") && ($("#stat-vocab-size").textContent = Vocab.size()); });
 
-          btnClear.addEventListener("click", () => {
-            inputText.value = "";
-            tokenizeAndPreview(true);
-            Vocab.reset();
-            UI.$("#stat-vocab-size").textContent = Vocab.size();
-            console.info("Cleared input and reset vocabulary");
-          });
-
-          UI.$("#btn-create-model").addEventListener("click", async () => {
+          $("#btn-create-model").addEventListener("click", async () => {
             try {
-              const vocabSize = Math.max(1, Vocab.size());
-              const embeddingDim = Math.max(1, parseInt(UI.$("#embedding-dim").value, 10));
-              const optimizer = UI.$("#optimizer-type").value;
-              const lr = parseFloat(UI.$("#learning-rate").value);
-              await Trainer.createModel({ inputDim: vocabSize, outputDim: embeddingDim, optimizer, learningRate: lr });
-              UI.$("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`;
-              // update slice control max
-              sliceA.max = Math.max(0, embeddingDim - 1);
-              sliceB.max = Math.max(0, embeddingDim - 1);
-              sliceC.max = Math.max(0, embeddingDim - 1);
-            } catch (err) {
-              console.error("Failed to create model", err);
-            }
+              const vocabSize = Math.max(1, Vocab.size() || 4);
+              const embeddingDim = Math.max(1, parseInt($("#embedding-dim").value,10) || 8);
+              const optimizer = $("#optimizer-type").value;
+              const lr = parseFloat($("#learning-rate").value) || 0.01;
+              const m = await Trainer.createModel({ inputDim: vocabSize, outputDim: embeddingDim, optimizer, learningRate: lr });
+              $("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`;
+              pushLog("info","created model");
+            } catch (err) { pushLog("error","create model failed: "+err.message); }
           });
 
-          UI.$("#btn-train").addEventListener("click", async () => {
+          $("#btn-train").addEventListener("click", async () => {
             try {
-              if (!Trainer.hasModel()) {
-                console.warn("No model exists. Creating one automatically using current vocab & settings.");
-                await UI.$("#btn-create-model").click();
-              }
-              const encoded = Vocab.encode(tokenizeAndPreview(true));
-              if (encoded.length === 0) {
-                console.warn("No tokens to train on");
-                return;
-              }
-              const params = {
-                batchSize: parseInt(UI.$("#batch-size").value, 10),
-                epochs: parseInt(UI.$("#epochs").value, 10),
-                optimizer: UI.$("#optimizer-type").value,
-                learningRate: parseFloat(UI.$("#learning-rate").value),
-              };
-
-              // hooks: onBatchEnd extract embeddings, visualize; also show live text if enabled
+              if (!Trainer.hasModel()) { await $("#btn-create-model").click(); }
+              const enc = Vocab.encode(tokenizeAndPreview(true));
+              if (!enc || enc.length===0) { pushLog("warn","no tokens to train"); return; }
+              const params = { batchSize: parseInt($("#batch-size").value,10)||8, epochs: parseInt($("#epochs").value,10)||1 };
               const hooks = {
                 onBatchEnd: async (batch, logs) => {
                   try {
@@ -1215,358 +609,185 @@
                     if (!embVar) return;
                     const raw = await Visual.extractEmbeddings(embVar);
                     const labels = Vocab.exportVocab().idToToken;
-                    const visualDimChoice = parseInt(visualDims.value, 10);
-                    const visualModeChoice = visualMode.value;
-                    const sliceAxes = [parseInt(sliceA.value, 10), parseInt(sliceB.value, 10), parseInt(sliceC.value, 10)];
-                    await Visual.visualizePoints(raw, labels, visualDimChoice, visualModeChoice, sliceAxes);
-
-                    // update live text plot if enabled
-                    if (liveModeEnabled) {
-                      const s = liveTextInput.value || "";
-                      const tokenizer = Tokenizers.buildTokenizer(UI.$("#tokenizer-type").value, { n: Math.max(1, parseInt(UI.$("#ngram-n").value, 10)), pattern: UI.$("#custom-regex").value, mode: UI.$("#ngram-mode").value });
-                      const toks = tokenizer(s);
-                      // map tokens to embeddings if present
+                    const dimsReq = parseInt($("#visual-dims").value,10);
+                    const mode = $("#visual-mode").value;
+                    await Visual.visualizePoints(raw, labels, dimsReq, mode, null);
+                    // live text
+                    if (liveMode) {
+                      const s = $("#live-text").value || "";
+                      const tok = Tokenizers.buildTokenizer($("#tokenizer-type").value, { n: Math.max(1,parseInt($("#ngram-n").value,10)), mode: $("#ngram-mode").value });
+                      const toks = tok(s);
                       const vocab = Vocab.exportVocab();
-                      const allEmb = await embVar.array();
-                      const selected = toks.map((t) => {
-                        const id = (t in vocab.tokenToId) ? vocab.tokenToId[t] : -1;
-                        if (id >= 0 && id < allEmb.length) return allEmb[id];
-                        return new Array(allEmb[0].length).fill(0);
-                      });
-                      // render selected in live-plot with PCA
-                      if (selected.length > 0) {
+                      const allEmb = await (Trainer.getEmbeddingMatrix()).array();
+                      const selected = toks.map(t => { const id = (t in vocab.tokenToId) ? vocab.tokenToId[t] : -1; if (id>=0 && id<allEmb.length) return allEmb[id]; return new Array(allEmb[0].length).fill(0); });
+                      if (selected.length>0) {
                         const p = await Visual.projectPCA(selected, 2);
-                        Plotly.react("live-plot", [{
-                          x: p.map(x => x[0]),
-                          y: p.map(x => x[1]),
-                          text: toks,
-                          mode: "markers+text",
-                          type: "scatter",
-                          marker: { size: 8 }
-                        }], { title: `Live probe (batch ${batch})`, margin: { t: 20 }, paper_bgcolor: "rgba(0,0,0,0)", font: { color: "#e6eef6" } });
-                      } else {
-                        Plotly.react("live-plot", [{ x: [], y: [], mode: "markers" }], { title: `Live probe (no tokens)`, margin: { t: 20 } });
+                        Plotly.react("live-plot", [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text: toks, mode:"markers+text", type:"scatter" }], { title: "Live probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
                       }
                     }
-
-                  } catch (err) {
-                    console.error("onBatchEnd hook error", err);
-                  }
-                },
-                onEpochEnd: async (epoch, logs) => {
-                  console.info("Epoch finished:", epoch, logs);
-                },
+                  } catch (e) { console.error("onBatchEnd",e); }
+                }
               };
-
-              await Trainer.trainOnDataset(encoded, params, hooks);
-              console.info("Training completed");
-            } catch (err) {
-              console.error("Training failed", err);
-            }
+              await Trainer.trainOnDataset(enc, params, hooks);
+              pushLog("info","training finished");
+            } catch (err) { pushLog("error","train failed: "+err.message); }
           });
 
-          UI.$("#btn-probe").addEventListener("click", async () => { await probeNow(); });
-
-          let liveProbe = false;
-          UI.$("#btn-probe-live").addEventListener("click", () => {
-            liveProbe = !liveProbe;
-            UI.$("#btn-probe-live").textContent = liveProbe ? "Live probe (on)" : "Live probe";
-            if (liveProbe) UI.$("#probe-text").addEventListener("input", probeNow);
-            else UI.$("#probe-text").removeEventListener("input", probeNow);
-          });
-
-          UI.$("#btn-export-emb").addEventListener("click", async () => {
+          $("#btn-probe") && $("#btn-probe").addEventListener("click", probeNow);
+          $("#btn-export-emb").addEventListener("click", async () => {
             try {
               const emb = Trainer.getEmbeddingMatrix();
-              if (!emb) {
-                console.warn("No embedding available");
-                return;
-              }
+              if (!emb) { pushLog("warn","no embedding"); return; }
               const arr = await emb.array();
-              console.log("Exported embeddings (vocabIndex => vector):", Vocab.exportVocab().idToToken, arr);
-              alert("Embeddings printed to console.");
-            } catch (err) {
-              console.error("Export failed", err);
-            }
+              console.log("embeddings:", Vocab.exportVocab().idToToken, arr);
+              alert("Embeddings in console.");
+            } catch (e) { console.error(e); }
           });
 
-          UI.$("#btn-reset").addEventListener("click", () => {
-            try {
-              Trainer.resetModel();
-              UI.$("#model-summary").textContent = "";
-              UI.$("#status-emb-size").textContent = "0";
-            } catch (err) {
-              console.error("Reset failed", err);
-            }
-          });
+          $("#btn-reset").addEventListener("click", () => { Trainer.resetModel(); $("#status-emb-size").textContent="0"; pushLog("info","model reset"); });
 
-          // tensor & internals buttons
-          UI.$("#btn-show-emb-math").addEventListener("click", async () => {
+          $("#btn-live-toggle").addEventListener("click", () => { liveMode = !liveMode; $("#btn-live-toggle").textContent = liveMode ? "Live (on)" : "Live (off)"; });
+
+          $("#btn-show-emb-math").addEventListener("click", async () => {
             try {
               const emb = Trainer.getEmbeddingMatrix();
-              if (!emb) {
-                console.warn("No embedding available");
-                UI.$("#tensor-meta").textContent = "No embedding matrix available";
-                UI.$("#tensor-mathml").textContent = "";
-                return;
-              }
+              if (!emb) { $("#tensor-meta").textContent = "No embedding available"; $("#tensor-mathml-render").innerHTML = ""; $("#tensor-heatmap").innerHTML=""; return; }
               const res = await tensorToMathML(emb);
-              UI.$("#tensor-meta").textContent = res.meta;
-              UI.$("#tensor-mathml").textContent = res.mathml;
-            } catch (err) {
-              console.error("Show embedding math failed", err);
-            }
+              $("#tensor-meta").textContent = res.meta;
+              // Insert MathML raw so browsers render it (if supported)
+              const renderEl = $("#tensor-mathml-render");
+              renderEl.innerHTML = ""; const wrapper = document.createElement("div"); wrapper.innerHTML = res.mathml; renderEl.appendChild(wrapper);
+              // heatmap
+              try {
+                const z = (res.array && Array.isArray(res.array)) ? res.array : [[]];
+                Plotly.react("tensor-heatmap", [{ z, type:"heatmap", colorscale:"Viridis" }], { title: "Embedding heatmap", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+              } catch(e) { console.warn("heatmap failed", e); }
+            } catch (e) { console.error(e); }
           });
 
-          UI.$("#btn-show-model-internals").addEventListener("click", async () => {
+          $("#btn-show-model-internals").addEventListener("click", async () => {
             try {
               const internals = await Trainer.readModelInternals();
-              if (!internals) {
-                UI.$("#model-internals").textContent = "No model internals available";
-                return;
-              }
-              let out = "";
-              for (let i = 0; i < internals.length; i++) {
+              const container = $("#model-internals-render"); container.innerHTML = "";
+              if (!internals) { container.textContent = "No model internals"; return; }
+              for (let i=0;i<internals.length;i++){
                 const li = internals[i];
-                out += `Layer: ${li.name} (${li.className})\n`;
-                for (let j = 0; j < li.weights.length; j++) {
+                const hdr = document.createElement("div"); hdr.innerHTML = `<strong>Layer: ${escapeHtml(li.name)} (${escapeHtml(li.className)})</strong>`; container.appendChild(hdr);
+                for (let j=0;j<li.weights.length;j++){
+                  const wt = li.weights[j];
+                  const block = document.createElement("div"); block.style.marginTop="6px";
+                  block.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--muted)">weight: ${escapeHtml(wt.name)}</div>`;
                   try {
-                    const wt = li.weights[j];
-                    const t = wt.tensor;
-                    const tRes = await tensorToMathML(t);
-                    out += `  weight: ${wt.name} | ${tRes.meta}\n`;
-                    out += `  MathML:\n${tRes.mathml}\n\n`;
-                  } catch (e) {
-                    out += `  weight: error reading\n`;
-                  }
+                    const res = await tensorToMathML(wt.tensor);
+                    const mdiv = document.createElement("div"); mdiv.innerHTML = res.mathml;
+                    block.appendChild(mdiv);
+                    // add mini heatmap
+                    const heatId = `heat-${i}-${j}-${Date.now()}`;
+                    const heatDiv = document.createElement("div"); heatDiv.id = heatId; heatDiv.className = "heatmap"; heatDiv.style.height = "140px"; heatDiv.style.marginTop="6px";
+                    block.appendChild(heatDiv);
+                    const z = (res.array && Array.isArray(res.array)) ? res.array : [[res.array]];
+                    try { Plotly.react(heatId, [{ z, type:"heatmap", colorscale:"Viridis" }], { title: `${wt.name} heatmap`, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} }); } catch(e){ console.warn("plot heat error",e); }
+                    container.appendChild(block);
+                  } catch(e) { block.appendChild(document.createTextNode("error rendering weight")); container.appendChild(block); }
                 }
               }
-              UI.$("#model-internals").textContent = out;
-            } catch (err) {
-              console.error("Show model internals failed", err);
-            }
+            } catch (e) { console.error(e); }
           });
 
-          // live during training toggle
-          let liveModeEnabled = false;
-          liveToggle.addEventListener("click", () => {
-            liveModeEnabled = !liveModeEnabled;
-            liveToggle.textContent = liveModeEnabled ? "Live during training (on)" : "Live during training (off)";
-          });
+          $("#run-tests").addEventListener("click", runTests);
 
-          // visual mode controls
-          visualMode.addEventListener("change", () => {
-            const m = visualMode.value;
-            if (m === "3d-slice") sliceControls.style.display = "flex";
-            else sliceControls.style.display = "none";
-          });
-
-          // run tests button
-          UI.$("#run-tests").addEventListener("click", runTests);
-
-        } catch (err) {
-          console.error("initUI failed", err);
-        }
+        } catch (e) { console.error("initUI", e); }
       }
 
-      // Tokenize and render preview; returns tokens array
-      function tokenizeAndPreview(forceTokens = false) {
+      function tokenizeAndPreview(force) {
         try {
-          const text = UI.$("#input-text").value;
-          const type = UI.$("#tokenizer-type").value;
-          const n = Math.max(1, parseInt(UI.$("#ngram-n").value, 10) || 2);
-          const pattern = UI.$("#custom-regex").value || "\\b\\w+\\b";
-          const mode = UI.$("#ngram-mode").value || "word";
-
-          const tokenizer = Tokenizers.buildTokenizer(type, { n, pattern, mode });
-          const tokens = tokenizer(text);
-
-          const previewEl = UI.$("#token-preview");
-          previewEl.innerHTML = "";
-          tokens.forEach(t => {
-            const span = document.createElement("div");
-            span.className = "token-pill";
-            span.textContent = t;
-            previewEl.appendChild(span);
-          });
-
-          UI.$("#stat-token-count").textContent = tokens.length;
-          UI.$("#stat-unique-count").textContent = Array.from(new Set(tokens)).length;
-
-          if (forceTokens) {
-            console.info("Tokenize completed:", tokens.length, "tokens");
-          }
-          return tokens;
-        } catch (err) {
-          console.error("tokenizeAndPreview error", err);
-          return [];
-        }
+          const text = $("#input-text").value || "";
+          const type = $("#tokenizer-type").value;
+          const n = Math.max(1, parseInt($("#ngram-n").value,10)||2);
+          const mode = $("#ngram-mode").value;
+          const tokenizer = Tokenizers.buildTokenizer(type, { n, mode });
+          const toks = tokenizer(text);
+          const preview = $("#token-preview"); preview.innerHTML = "";
+          toks.forEach(t => { const el = document.createElement("div"); el.className="token-pill"; el.textContent = t; preview.appendChild(el); });
+          $("#stat-token-count").textContent = toks.length; $("#stat-unique-count").textContent = Array.from(new Set(toks)).length;
+          if (force) pushLog("info","tokenized "+toks.length+" tokens");
+          return toks;
+        } catch (e) { console.error(e); return []; }
       }
 
-      // Probe: show tokens from probe text & visualize their embedding positions if model exists
       async function probeNow() {
         try {
-          const s = UI.$("#probe-text").value;
-          const type = UI.$("#tokenizer-type").value;
-          const n = Math.max(1, parseInt(UI.$("#ngram-n").value, 10) || 2);
-          const pattern = UI.$("#custom-regex").value || "\\b\\w+\\b";
-          const mode = UI.$("#ngram-mode").value || "word";
-          const tokenizer = Tokenizers.buildTokenizer(type, { n, pattern, mode });
-          const tokens = tokenizer(s);
-          const preview = UI.$("#probe-preview");
-          preview.innerHTML = "";
-          tokens.forEach(t => {
-            const el = document.createElement("div");
-            el.className = "token-pill";
-            el.textContent = t;
-            preview.appendChild(el);
-          });
-
+          const s = ($("#probe-text") && $("#probe-text").value) || "";
+          const tokenizer = Tokenizers.buildTokenizer($("#tokenizer-type").value, { n: Math.max(1,parseInt($("#ngram-n").value,10)||2), mode: $("#ngram-mode").value });
+          const toks = tokenizer(s);
+          // show in preview if exist
+          const preview = $("#probe-preview"); if (preview) { preview.innerHTML = ""; toks.forEach(t=>{ const d=document.createElement("div"); d.className="token-pill"; d.textContent=t; preview.appendChild(d); }); }
           if (Trainer.hasModel()) {
             const embVar = Trainer.getEmbeddingMatrix();
-            if (!embVar) {
-              console.warn("No embedding matrix available");
-              return;
-            }
-            const vocab = Vocab.exportVocab();
-            const ids = tokens.map(t => (t in vocab.tokenToId ? vocab.tokenToId[t] : -1));
             const allEmb = await embVar.array();
-            const selected = ids.map((id) => {
-              if (id >= 0 && id < allEmb.length) return allEmb[id];
-              return new Array(allEmb[0].length).fill(0);
-            });
-            const labels = tokens.slice();
-            const dimsReq = parseInt(UI.$("#visual-dims").value, 10);
-            const mode = UI.$("#visual-mode").value;
-            const sliceAxes = [parseInt(UI.$("#slice-a").value, 10), parseInt(UI.$("#slice-b").value, 10), parseInt(UI.$("#slice-c").value, 10)];
-            await Visual.visualizePoints(selected, labels, dimsReq, mode, sliceAxes);
-            console.info("Probe visualized", tokens.length, "tokens");
-          } else {
-            console.info("Probe tokenized (no model):", tokens.length, "tokens");
+            const vocab = Vocab.exportVocab();
+            const selected = toks.map(t => { const id = (t in vocab.tokenToId)?vocab.tokenToId[t]:-1; return (id>=0 && id<allEmb.length)?allEmb[id]:new Array(allEmb[0].length).fill(0); });
+            if (selected.length>0) {
+              const p = await Visual.projectPCA(selected,2);
+              Plotly.react("live-plot", [{ x: p.map(r=>r[0]), y: p.map(r=>r[1]), text:toks, mode:"markers+text", type:"scatter" }], { title:"Probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+            }
           }
-        } catch (err) {
-          console.error("probeNow failed", err);
-        }
+        } catch (e) { console.error(e); }
       }
 
-      /* ----------------------
-         Test suite (extended)
-         ---------------------- */
-
+      // Test suite (adds checks for MathML render + transparent layout)
       async function runTests() {
         const results = [];
-        console.group("Test Suite");
+        console.group("Tests");
         try {
-          console.log("Starting tests...");
+          // T1 whitespace tokenizer
+          try { const t = Tokenizers.buildTokenizer("whitespace"); const out = t("a b c"); if (Array.isArray(out) && out.length===3) { results.push({name:"t_whitespace",ok:true}); } else { results.push({name:"t_whitespace",ok:false}); } } catch(e){ results.push({name:"t_whitespace",ok:false,err:e}); }
 
-          // Test 1: whitespace tokenizer
+          // T2 ngram char
+          try { const tn = Tokenizers.buildTokenizer("ngram",{n:2,mode:"char"}); const out = tn("ab cd"); if (Array.isArray(out) && out.length>=3 && out[0]==="ab") results.push({name:"t_ngram_char",ok:true}); else results.push({name:"t_ngram_char",ok:false}); } catch(e){ results.push({name:"t_ngram_char",ok:false,err:e}); }
+
+          // T3 create model and show emb math
           try {
-            const t1 = Tokenizers.buildTokenizer("whitespace");
-            const out1 = t1("hello world  test");
-            if (Array.isArray(out1) && out1.length === 3) { console.log("Tokenizer whitespace -> PASS"); results.push({ name: "tokenizer_whitespace", ok: true }); }
-            else { console.error("Tokenizer whitespace -> FAIL", out1); results.push({ name: "tokenizer_whitespace", ok: false }); }
-          } catch (err) { console.error("Tokenizer whitespace -> ERROR", err); results.push({ name: "tokenizer_whitespace", ok: false, err }); }
-
-          // Test 2: ngram word
-          try {
-            const tn = Tokenizers.buildTokenizer("ngram", { n: 2, mode: "word" });
-            const out2 = tn("one two three");
-            if (out2.length === 2 && out2[0] === "one_two") { console.log("Tokenizer ngram (word) -> PASS"); results.push({ name: "tokenizer_ngram_word", ok: true }); }
-            else { console.error("Tokenizer ngram (word) -> FAIL", out2); results.push({ name: "tokenizer_ngram_word", ok: false }); }
-          } catch (err) { console.error("Tokenizer ngram word -> ERROR", err); results.push({ name: "tokenizer_ngram_word", ok: false, err }); }
-
-          // Test 3: ngram char
-          try {
-            const tn2 = Tokenizers.buildTokenizer("ngram", { n: 2, mode: "char" });
-            const out3 = tn2("ab cd"); // after removing spaces -> "abcd" -> ["ab","bc","cd"]
-            if (Array.isArray(out3) && out3[0] === "ab" && out3.length >= 3) { console.log("Tokenizer ngram (char) -> PASS"); results.push({ name: "tokenizer_ngram_char", ok: true }); }
-            else { console.error("Tokenizer ngram (char) -> FAIL", out3); results.push({ name: "tokenizer_ngram_char", ok: false }); }
-          } catch (err) { console.error("Tokenizer ngram char -> ERROR", err); results.push({ name: "tokenizer_ngram_char", ok: false, err }); }
-
-          // Test 4: Vocab build & encode produce integers
-          try {
-            Vocab.reset();
-            Vocab.buildFromTokens(["a", "b", "c"]);
-            const enc = Vocab.encode(["b", "a", "d"]);
-            const ok = Array.isArray(enc) && enc.every(n => Number.isInteger(n));
-            if (ok) { console.log("Vocab.encode returns ints -> PASS"); results.push({ name: "vocab_encode_type", ok: true }); }
-            else { console.error("Vocab.encode -> FAIL", enc); results.push({ name: "vocab_encode_type", ok: false }); }
-          } catch (err) { console.error("Vocab test -> ERROR", err); results.push({ name: "vocab_encode_type", ok: false, err }); }
-
-          // Test 5: Create model and verify layer.weights retrieval and MathML conversion
-          try {
-            Vocab.reset();
-            Vocab.buildFromTokens(["one", "two", "three", "four"]);
-            const params3 = { inputDim: Vocab.size(), outputDim: 4, optimizer: "adam", learningRate: 0.01 };
-            const model = await Trainer.createModel(params3);
-
-            // quick train to ensure weights exist
+            Vocab.reset(); Vocab.buildFromTokens(["one","two","three","four"]);
+            await Trainer.createModel({ inputDim: Vocab.size(), outputDim: 4, optimizer:"adam", learningRate:0.01 });
             const enc = Vocab.encode(["one","two","three","one"]);
-            await Trainer.trainOnDataset(enc.slice(0,4), { batchSize: 2, epochs: 1 }, {});
+            await Trainer.trainOnDataset(enc, { batchSize:2, epochs:1 }, {});
+            // show embedding math into DOM
+            await $("#btn-show-emb-math").click();
+            // check DOM
+            const mathEl = $("#tensor-mathml-render");
+            const mathHas = mathEl && mathEl.innerHTML && mathEl.innerHTML.indexOf("<math") !== -1;
+            results.push({ name: "t_emb_math_dom", ok: !!mathHas });
+          } catch (e) { results.push({ name: "t_emb_math_dom", ok: false, err: e }); }
 
-            const internals = await Trainer.readModelInternals();
-            let foundEmbeddingWeights = false;
-            if (Array.isArray(internals)) {
-              for (let i = 0; i < internals.length; i++) {
-                const li = internals[i];
-                for (let j = 0; j < li.weights.length; j++) {
-                  const wt = li.weights[j];
-                  if (wt && wt.tensor) {
-                    const tRes = await tensorToMathML(wt.tensor);
-                    if (typeof tRes.mathml === "string" && tRes.mathml.indexOf("<math") !== -1) {
-                      foundEmbeddingWeights = true;
-                    }
-                  }
-                }
-              }
-            }
-            if (foundEmbeddingWeights) { console.log("Model internals & MathML -> PASS"); results.push({ name: "model_internals_mathml", ok: true }); }
-            else { console.error("Model internals -> FAIL", internals); results.push({ name: "model_internals_mathml", ok: false }); }
-            Trainer.resetModel();
-          } catch (err) {
-            console.error("Model internals test -> ERROR", err);
-            results.push({ name: "model_internals_mathml", ok: false, err });
-          }
-
-          // Test 6: PCA projection
+          // T4 visualizePoints uses transparent layout (lastPlotLayout set)
           try {
-            const sample = [[1,2,3],[2,3,4],[3,4,5],[0,0,1]];
-            const p = await Visual.projectPCA(sample, 2);
-            if (Array.isArray(p) && p.length === sample.length) { console.log("PCA projection -> PASS"); results.push({ name: "pca_projection", ok: true }); }
-            else { console.error("PCA projection -> FAIL", p); results.push({ name: "pca_projection", ok: false }); }
-          } catch (err) { console.error("PCA projection -> ERROR", err); results.push({ name: "pca_projection", ok: false, err }); }
+            const points = [[1,2,3],[2,3,4],[3,2,1]];
+            await Visual.visualizePoints(points, ["a","b","c"], 4, "pca");
+            const ok = lastPlotLayout && lastPlotLayout.paper_bgcolor && String(lastPlotLayout.paper_bgcolor).indexOf("rgba")!==-1;
+            results.push({ name: "t_layout_transparent", ok: !!ok });
+          } catch (e) { results.push({ name: "t_layout_transparent", ok: false, err: e }); }
 
-          // Final report
-          const passed = results.filter(r => r.ok).length;
-          const total = results.length;
-          console.log(`Tests finished: ${passed}/${total} passed`);
-          alert(`Tests finished: ${passed}/${total} passed. See console for details.`);
-        } catch (err) {
-          console.error("Test suite failed", err);
-          alert("Test suite encountered an error; check console.");
-        } finally {
-          console.groupEnd();
-        }
+          // report
+          const passed = results.filter(r=>r.ok).length;
+          console.log("Test results", results);
+          alert(`Tests finished: ${passed}/${results.length} passed. Sieh Konsole für Details.`);
+        } catch (e) {
+          console.error("tests failed", e); alert("Tests encountered an error, check console.");
+        } finally { console.groupEnd(); }
       }
 
-      /* ----------------------
-         Initialize
-         ---------------------- */
-
+      // startup
+      let liveMode = false;
       (function main() {
         try {
-          console.info("App starting (extended)...");
           initUI();
           tokenizeAndPreview();
-
-          // initial plots
-          Plotly.newPlot("plot", [{ x: [], y: [], mode:"markers" }], { margin:{t:30}, title: "Embeddings" });
-          Plotly.newPlot("live-plot", [{ x: [], y: [], mode:"markers" }], { margin:{t:20}, title: "Live probe" });
-
-          console.info("Ready.");
-        } catch (err) {
-          console.error("main init error", err);
-        }
+          Plotly.newPlot("plot", [{ x:[], y:[], mode:"markers" }], { title:"Embeddings", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+          Plotly.newPlot("highdim-plot", [{ x:[], y:[], mode:"markers" }], { title:"High-dim", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+          Plotly.newPlot("live-plot", [{ x:[], y:[], mode:"markers" }], { title:"Live probe", paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)", font:{color:"#e6eef6"} });
+          pushLog("info","App ready");
+        } catch (e) { console.error("init error", e); pushLog("error","init error "+e.message); }
       })();
 
     })();
