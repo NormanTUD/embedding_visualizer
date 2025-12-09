@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Interactive Tokenizer → Embedding Trainer (didactic)</title>
+  <title id="doc-title">Interactive Tokenizer → Embedding Trainer (didactic)</title>
 
   <script src="./tf.min.js"></script>
   <script src="./plotly.latest.js"></script>
@@ -42,6 +42,9 @@
     pre.mathml { background: rgba(0,0,0,0.06); padding:8px; border-radius:8px; overflow:auto; font-family:var(--mono); font-size:12px; color:#dfe; max-height:180px; }
     .explain { font-size:13px; color:#dfe; line-height:1.45; }
     .badge { font-family:var(--mono); font-size:12px; padding:4px 8px; border-radius:999px; background:rgba(255,255,255,0.02); }
+    .dim-analysis-item { display:flex; justify-content:space-between; margin-bottom:4px; font-size:12px; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.02); }
+    .dim-analysis-item:last-child { border-bottom:none; }
+    .dim-analysis-item strong { color:var(--accent); }
     @media (max-width: 980px) { .container { grid-template-columns: 1fr; padding-bottom:180px; } #plot { height:320px; } #highdim-plot { height:260px; } #live-plot { height:200px; } }
   </style>
 </head>
@@ -93,13 +96,27 @@
           <div class="token-output" id="token-preview"></div>
         </div>
 
-        <div style="display:flex;gap:8px;align-items:center;justify-content:space-between;">
+        <div style="display:grid;grid-template-columns: 1fr 180px;gap:8px;align-items:center;">
           <div class="muted">Tokens: <strong id="stat-token-count">0</strong> • Unique: <strong id="stat-unique-count">0</strong></div>
           <div style="display:flex;gap:6px;">
             <button id="btn-tokenize" class="ghost">Tokenize</button>
             <button id="btn-build-vocab">Build vocab</button>
-            <button id="btn-clear" class="ghost">Clear</button>
           </div>
+        </div>
+        
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+            <div style="width:160px;">
+                <label for="embedding-dim">Embedding Länge (Dim)</label>
+                <input id="embedding-dim" type="number" min="1" value="8" />
+            </div>
+            <div style="flex:1;">
+                <label for="epochs">Epochs</label>
+                <input id="epochs" type="number" min="1" value="100" />
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button id="btn-create-model">Create model</button>
+                <button id="btn-train">Train</button>
+            </div>
         </div>
       </div>
     </section>
@@ -107,12 +124,10 @@
     <aside class="sidebar">
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <strong>Embedding & Training</strong>
+          <strong>Visualisierung & Konfig.</strong>
           <small class="muted">Konfiguration</small>
         </div>
         <div class="grid" style="margin-top:8px;">
-          <label for="embedding-dim">Embedding Länge (Dim)</label>
-          <input id="embedding-dim" type="number" min="1" value="8" />
           <label for="visual-dims">Visual dims (1-3 zeigen im Hauptplot; >3 nutzt High-Dim Ansicht)</label>
           <select id="visual-dims"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4+</option></select>
           <label for="visual-mode">High-Dim Visualisierung</label>
@@ -131,13 +146,7 @@
           <select id="optimizer-type"><option value="sgd">SGD</option><option value="adam" selected>Adam</option></select>
           <label for="batch-size">Batch size</label>
           <input id="batch-size" type="number" min="1" value="8" />
-          <label for="epochs">Epochs</label>
-          <input id="epochs" type="number" min="1" value="6" />
-          <div style="display:flex;gap:8px;">
-            <button id="btn-create-model">Create model</button>
-            <button id="btn-train">Train</button>
-          </div>
-          <div>
+          <div style="margin-top:8px;">
             <label>Model summary</label>
             <pre id="model-summary" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;"></pre>
           </div>
@@ -156,21 +165,33 @@
                 </div>
             </div>
 
-            <label for="radar-tokens">Token Profile (Radar Diagramm)</label>
+            <label for="radar-tokens">Token Profile (Radar Diagramm) - Nr. 6</label>
             <input id="radar-tokens" placeholder="Gib Token mit Komma getrennt ein (z.B. Test,das,ist)" />
             <div id="radar-plot" style="height:250px; margin-top:8px;"></div>
             <button id="btn-plot-radar" class="ghost">Plot Profile (Nr. 6)</button>
             <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0;">
 
-            <div style="margin-top:8px;">
-            </div>
-            <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0;">
-
-            <label>Recurrence Plot (Sequentielle Ähnlichkeit)</label>
+            <label>Recurrence Plot (Sequentielle Ähnlichkeit) - Nr. 9</label>
             <div id="recurrence-plot" style="height:250px; margin-top:8px;"></div>
             <button id="btn-plot-recurrence" class="ghost">Plot Recurrence (Nr. 9)</button>
         </div>
       </div>
+      
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong>Dimension Feature Ranking (Nr. 5)</strong>
+          <small class="muted">Interpretation-Hilfe</small>
+        </div>
+        <div style="margin-top:8px;">
+            <div class="explain">
+                <p>Jede Dimension (Feature) im Embedding-Vektor "kodiert" eine bestimmte Eigenschaft. Hier sehen Sie die Tokens, die in der jeweiligen Dimension die höchsten (<strong>max</strong>) bzw. niedrigsten (<strong>min</strong>) Werte aufweisen. Das hilft zu erraten, was die Dimension gelernt hat.</p>
+            </div>
+            <div id="dim-ranking-output" style="margin-top:8px;">
+                <p class="muted">Modell erstellen und trainieren, um Ranking zu sehen.</p>
+            </div>
+        </div>
+      </div>
+
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <strong>Live während Training</strong>
@@ -196,11 +217,7 @@
         <div style="margin-top:8px;">
           <div class="explain" style="margin-bottom:8px;">
             <strong>Was du hier siehst</strong>
-            <p>Wähle "Show embedding matrix" oder "Show model internals". Matrizen werden <em>als gerenderte MathML</em> angezeigt (falls der Browser MathML unterstützt) und zusätzlich als Heatmap, damit du Muster wie ähnliche Vektoren oder starke/negative Werte visuell erkennen kannst.</p>
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button id="btn-show-emb-math" class="ghost">Show embedding matrix</button>
-            <button id="btn-show-model-internals" class="ghost">Show model internals</button>
+            <p>Die Matrizen werden <em>als gerenderte MathML</em> angezeigt (falls der Browser MathML unterstützt) und zusätzlich als Heatmap, damit du Muster wie ähnliche Vektoren oder starke/negative Werte visuell erkennen kannst.</p>
           </div>
           <div style="margin-top:8px;">
             <div id="tensor-meta" class="muted"></div>
@@ -402,7 +419,11 @@
         logBuffer.push(entry);
         if (logBuffer.length > 1000) logBuffer.shift();
         renderLogs();
-        try { $("#status-last").textContent = `[${level}] ${message.split("\\n")[0]}`; $("#ui-status").textContent = level; } catch (e) {}
+        try { 
+            $("#status-last").textContent = `[${level}] ${message.split("\\n")[0]}`; 
+            $("#ui-status").textContent = level; 
+            if (level === 'error') console.error(message);
+        } catch (e) {}
       }
       function renderLogs() {
         const el = $("#logpane");
@@ -419,7 +440,9 @@
         methods.forEach(m => {
           const orig = console[m].bind(console);
           console[m] = function(...args) {
-            try { pushLog(m, args.map(a => (a && a.stack) ? a.stack : (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")); } catch (e) {}
+            try { 
+                if (m !== 'error') pushLog(m, args.map(a => (a && a.stack) ? a.stack : (typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ")); 
+            } catch (e) {}
             orig(...args);
           };
         });
@@ -472,7 +495,14 @@
         }
         function addTokens(tokens) { tokens.forEach(t => { if (t && !(t in tokenToId)) { tokenToId[t] = idToToken.length; idToToken.push(t); } }); }
         function size() { return idToToken.length; }
-        function encode(tokens) { return tokens.map(t => { if (t in tokenToId) return tokenToId[t]; console.warn(`Token '${t}' not in vocab, adding it.`); tokenToId[t] = idToToken.length; idToToken.push(t); return tokenToId[t]; }).filter(i=>i>=0); } 
+        function encode(tokens) { 
+            return tokens.map(t => { 
+                if (t in tokenToId) return tokenToId[t]; 
+                // Don't warn on new tokens during encode, just return -1 for UNK (which is not used in this specific training setup)
+                // For this didactic model (Word2Vec CBOW style), we just encode tokens that are in vocab. 
+                return -1; 
+            }).filter(i=>i>=0); 
+        } 
         function decode(ids) { return ids.map(i => idToToken[i] || "<UNK>"); }
         function reset() { tokenToId = {}; idToToken = []; }
         function exportVocab() { return { tokenToId: Object.assign({}, tokenToId), idToToken: idToToken.slice() }; }
@@ -496,12 +526,18 @@
             });
             const embedOut = emb.apply(input);
             const flat = tf.layers.flatten().apply(embedOut);
+            // This is a simplified Skip-gram/CBOW-style architecture where the input token tries to predict itself 
+            // via the dense layer after embedding (which is not entirely accurate for true Skip-gram, but serves the didactic purpose of learning embeddings).
             const decoder = tf.layers.dense({ units: inputDim, activation: "softmax", name: "decoder" }).apply(flat);
             const m = tf.model({ inputs: input, outputs: decoder, name:"embed_model" });
             const opt = (params.optimizer === "sgd") ? tf.train.sgd(params.learningRate || 0.01) : tf.train.adam(params.learningRate || 0.01);
             m.compile({ optimizer: opt, loss: "sparseCategoricalCrossentropy", metrics: ["accuracy"] });
             model = m; created=true;
-            try { let s=""; m.summary(80,{print: (l)=> s+=l+"\n" }); $("#model-summary").textContent = s; } catch(e) {}
+            try { 
+                let s=""; 
+                m.summary(80,{print: (l)=> s+=l+"\n" }); 
+                $("#model-summary").textContent = s; 
+            } catch(e) {}
             return m;
           } catch (err) { console.error("createModel", err); throw err; }
         }
@@ -514,6 +550,7 @@
           if (!hasModel()) throw new Error("no model");
           if (!Array.isArray(encodedTokens) || encodedTokens.length===0) return;
           const N = encodedTokens.length;
+          const epochs = params.epochs || 1;
           const xsArr = encodedTokens.map(v => [parseInt(v,10)]);
           const ysArr = encodedTokens.map(v => parseInt(v,10));
           
@@ -522,21 +559,26 @@
           
           await model.fit(xs, ys, {
             batchSize: params.batchSize || 8,
-            epochs: params.epochs || 1,
+            epochs: epochs,
             shuffle: true,
             callbacks: {
               onBatchEnd: async (batch, logs) => { 
                 await tf.nextFrame();
                 if (hooks && hooks.onBatchEnd) await hooks.onBatchEnd(batch, logs); 
               },
+              onEpochBegin: (epoch) => {
+                  $("#doc-title").textContent = `Interactive Tokenizer → Training Epoch ${epoch+1}/${epochs}`;
+              },
               onEpochEnd: async (epoch, logs) => { 
                 epochLosses.push(logs.loss);
                 Visual.plotLoss(epochLosses);
                 if (hooks && hooks.onEpochEnd) await hooks.onEpochEnd(epoch, logs); 
+                $("#doc-title").textContent = `Interactive Tokenizer → Embedding Trainer (Finished Epoch ${epoch+1}/${epochs})`;
               }
             }
           });
           xs.dispose(); ys.dispose();
+          $("#doc-title").textContent = `Interactive Tokenizer → Embedding Trainer (didactic)`;
         }
         function resetModel(){ try { if (model) { model.dispose(); model=null; created=false; lastEmbedding=null; $("#model-summary").textContent=""; epochLosses=[]; Visual.plotLoss(epochLosses); } } catch(e){} }
         async function readModelInternals() {
@@ -620,7 +662,7 @@
             let dotProduct = 0; let normA = 0; let normB = 0;
             const len = Math.min(vecA.length, vecB.length);
             for (let i = 0; i < len; i++) {
-                dotProduct += vecA[i] * vecB[i];
+                dotProduct += vecA[i] * vecA[i];
                 normA += vecA[i] * vecA[i];
                 normB += vecB[i] * vecB[i];
             }
@@ -877,9 +919,14 @@
 
             tf.tidy(() => {
                 const embeddings = emb.arraySync();
-                const sequenceEmbeddings = tokenIds.map(id => embeddings[id]);
+                const sequenceEmbeddings = tokenIds.map(id => embeddings[id]).filter(e => e); // Filter out unk tokens
                 const N = sequenceEmbeddings.length;
                 const labels = tokens.slice(0, N);
+
+                if (N === 0) {
+                    Plotly.react("recurrence-plot", [], layoutTransparent("Recurrence Plot: Keine bekannten Tokens in Sequenz"));
+                    return;
+                }
 
                 const similarityMatrix = Array.from({length:N}, (_, i) => 
                     Array.from({length:N}, (_, j) => 
@@ -907,8 +954,45 @@
                 Plotly.react("recurrence-plot", data, lay);
             });
         }
+        
+        // Nr. 5: Dimension Feature Ranking
+        function plotDimensionRanking(embeddings, labels, topK = 3) {
+            const outputEl = $("#dim-ranking-output");
+            if (!embeddings || embeddings.length === 0 || embeddings[0].length === 0) {
+                outputEl.innerHTML = '<p class="muted">Modell erstellen und trainieren, um Ranking zu sehen.</p>';
+                return;
+            }
 
-        return { extractEmbeddings, visualizePoints, projectPCA, plotLoss, cosineSimilarity, distanceMatrix, correlationMatrix, plotDimensionHistograms, plotTokenProfiles, plotRecurrencePlot };
+            const D = embeddings[0].length;
+            let html = '';
+
+            for (let d = 0; d < D; d++) {
+                const dimValues = embeddings.map((vec, i) => ({ value: vec[d], token: labels[i] }));
+
+                // Sort ascending for min (lowest value at start)
+                dimValues.sort((a, b) => a.value - b.value);
+                const minTokens = dimValues.slice(0, topK);
+
+                // Sort descending for max (highest value at start)
+                dimValues.sort((a, b) => b.value - a.value);
+                const maxTokens = dimValues.slice(0, topK);
+
+                html += `
+                    <div class="dim-analysis-item">
+                        <strong>Dim ${d + 1}</strong>
+                        <span>
+                            min: ${minTokens.map(t => escapeHtml(t.token)).join(', ')} / 
+                            max: ${maxTokens.map(t => escapeHtml(t.token)).join(', ')}
+                        </span>
+                    </div>
+                `;
+            }
+
+            outputEl.innerHTML = html;
+        }
+
+
+        return { extractEmbeddings, visualizePoints, projectPCA, plotLoss, cosineSimilarity, distanceMatrix, correlationMatrix, plotDimensionHistograms, plotTokenProfiles, plotRecurrencePlot, plotDimensionRanking };
       })();
 
       // MathML helper
@@ -937,24 +1021,33 @@
       // Live Tokenizer & Vocab State
       let liveTokenizer = Tokenizers.buildTokenizer($("#tokenizer-type").value, { n:parseInt($("#ngram-n").value,10)||2, mode:$("#ngram-mode").value||"word" });
 
-      // UI Init & Event Handlers
-      function initUI() {
-        const inputText = $("#input-text");
+      /**
+       * Updates the global liveTokenizer instance based on current UI settings.
+       * @returns {void}
+       */
+      function refreshTokenizer() {
+        // Access elements via $ for global scope access
         const tokenizerType = $("#tokenizer-type");
         const ngramN = $("#ngram-n");
         const ngramMode = $("#ngram-mode");
         
-        function refreshTokenizer() {
-            const n = Math.max(1,parseInt(ngramN.value,10));
-            const mode = ngramMode.value;
-            liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n, mode });
-            if (inputText.value.trim().length > 0) { tokenizeAndPreview(false); }
+        const n = Math.max(1,parseInt(ngramN.value,10));
+        const mode = ngramMode.value;
+        liveTokenizer = Tokenizers.buildTokenizer(tokenizerType.value, { n, mode });
+        if ($("#input-text").value.trim().length > 0) { 
+            tokenizeAndPreview(false); 
         }
-        tokenizerType.addEventListener("change", refreshTokenizer);
-        ngramN.addEventListener("input", refreshTokenizer);
-        ngramMode.addEventListener("change", refreshTokenizer);
-        inputText.addEventListener("input", () => tokenizeAndPreview(false));
+      }
+
+      // UI Init & Event Handlers
+      function initUI() {
+        // No need to redeclare or redefine refreshTokenizer here, it's global now.
+        $("#tokenizer-type").addEventListener("change", refreshTokenizer);
+        $("#ngram-n").addEventListener("input", refreshTokenizer);
+        $("#ngram-mode").addEventListener("change", refreshTokenizer);
+        $("#input-text").addEventListener("input", () => tokenizeAndPreview(false));
         $("#btn-tokenize").addEventListener("click", ()=> tokenizeAndPreview(true));
+        
         $("#btn-build-vocab").addEventListener("click", ()=>{ 
             const toks = tokenizeAndPreview(true); 
             Vocab.buildFromTokens(toks); 
@@ -963,16 +1056,11 @@
             const embeddingDim = Math.max(1, parseInt($("#embedding-dim").value,10) || 8); 
             $("#status-emb-size").textContent = `${Vocab.size()}×${embeddingDim}`; 
         });
-        $("#btn-clear").addEventListener("click", ()=> { 
-            inputText.value=""; 
-            tokenizeAndPreview(true); 
-            Vocab.reset(); 
-            $("#status-emb-size").textContent="0"; 
-        });
         
         $("#btn-create-model").addEventListener("click", async () => { 
             try { 
                 if (Vocab.size() === 0) { 
+                    pushLog("warn", "Vocab empty, building vocab first...");
                     $("#btn-build-vocab").click(); 
                     await new Promise(r=>setTimeout(r,50)); 
                 } 
@@ -983,7 +1071,12 @@
                 const m = await Trainer.createModel({ inputDim: vocabSize, outputDim: embeddingDim, optimizer, learningRate: lr }); 
                 $("#status-emb-size").textContent = `${vocabSize}×${embeddingDim}`; 
                 pushLog("info","created model"); 
-                updateAllVisualizations(); 
+                
+                // --- AUTO VISUALIZATION: SHOW MODEL INTERNALS & EMBEDDINGS ---
+                await renderModelInternals(true); 
+                await updateAllVisualizations(); 
+                // -----------------------------------------------------------
+                
             } catch (err) { 
                 pushLog("error","create model failed: "+err.message); 
             } 
@@ -1020,16 +1113,15 @@
             URL.revokeObjectURL(url);
             pushLog("info", "Embeddings exported to embeddings_export.json");
         });
-        $("#btn-reset").addEventListener("click", () => { Trainer.resetModel(); updateAllVisualizations(); pushLog("info", "Model and plots reset."); });
+        $("#btn-reset").addEventListener("click", () => { Trainer.resetModel(); updateAllVisualizations(); Vocab.reset(); $("#status-emb-size").textContent="0"; pushLog("info", "Model, vocab and plots reset."); });
         $("#visual-dims").addEventListener("change", updateAllVisualizations);
         $("#visual-mode").addEventListener("change", updateAllVisualizations);
         $("#auto-highdim-toggle").addEventListener("change", updateAllVisualizations);
 
         $("#live-text").addEventListener("input", () => liveMode && probeNow(true));
-        $("#btn-live-toggle").addEventListener("click", () => { liveMode = !liveMode; $("#btn-live-toggle").textContent = liveMode ? "Live (on)" : "Live (off)"; if (liveMode) { probeNow(true); pushLog("info", "live mode activated"); } else { pushLog("info", "live mode deactivated"); } });
+        $("#btn-live-toggle").addEventListener("click", () => { liveMode = !liveMode; $("#btn-live-toggle").textContent = liveMode ? "Live (on)" : "Live (off)"; if (liveMode) { probeNow(true); pushLog("info", "live mode activated"); } else { Plotly.react("live-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Live probe")); pushLog("info", "live mode deactivated"); } });
         $("#btn-probe-now").addEventListener("click", () => probeNow(true));
-        $("#btn-show-emb-math").addEventListener("click", async () => { try { await renderEmbeddingInternals(); } catch (e) { console.error(e); } });
-        $("#btn-show-model-internals").addEventListener("click", async () => { try { await renderModelInternals(); } catch (e) { console.error(e); } });
+        
         $("#run-tests").addEventListener("click", runTests);
         
         // Nr. 6: Plot Radar
@@ -1075,6 +1167,7 @@
         // 1. Bar Plot for Output Probabilities (Prediction)
         const topK = 10;
         const sortedProbs = outputProbabilities.map((prob, index) => ({ prob, token: vocabLabels[index] }))
+            .filter(p => p.token) // Filter out <UNK>
             .sort((a, b) => b.prob - a.prob)
             .slice(0, Math.min(topK, vocabLabels.length));
         
@@ -1110,6 +1203,7 @@
 
             await Visual.visualizePoints(raw, labels, dimsReq, visualModeOverride, null);
             await Visual.plotDimensionHistograms(raw, labels); // Nr. 7
+            await Visual.plotDimensionRanking(raw, labels); // Nr. 5
             await renderEmbeddingInternals(true); 
             if (liveMode) await probeNow(true);
         } else {
@@ -1119,6 +1213,15 @@
             Plotly.react("dim-hist-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Histogramm-Verteilung")); // Nr. 7 aufräumen
             Plotly.react("radar-plot", [], layoutTransparent("Token Profile")); // Nr. 6 aufräumen
             Plotly.react("recurrence-plot", [], layoutTransparent("Recurrence Plot")); // Nr. 9 aufräumen
+            $("#dim-ranking-output").innerHTML = '<p class="muted">Modell erstellen und trainieren, um Ranking zu sehen.</p>';
+            
+            $("#tensor-meta").textContent = '';
+            $("#tensor-mathml-render").innerHTML = '';
+            $("#tensor-heatmap").innerHTML = '';
+            $("#model-internals-render").innerHTML = '';
+            Plotly.newPlot("tensor-heatmap", [], layoutTransparent("Embedding Matrix Heatmap"));
+            
+            Visual.plotLoss(epochLosses); 
         }
       } 
       
@@ -1131,7 +1234,7 @@
         $("#tensor-meta").textContent = `Embedding Matrix: ${meta}`;
         $("#tensor-mathml-render").innerHTML = `<pre class="mathml">${mathml}</pre>`;
         
-        if (arr && arr.length > 0) {
+        if (arr && arr.length > 0 && Array.isArray(arr[0])) {
             const z = arr;
             const x = Array.from({length:z[0].length}, (_,i)=>`dim${i+1}`);
             const y = Vocab.exportVocab().idToToken;
@@ -1143,20 +1246,25 @@
             }];
             const layout = layoutTransparent("Embedding Matrix Heatmap");
             Plotly.react("tensor-heatmap", data, layout);
+            
+            // Clear other internals view if it was active
+            $("#model-internals-render").innerHTML = '';
         } else {
             Plotly.react("tensor-heatmap", [], layoutTransparent("Embedding Matrix Heatmap"));
         }
       }
       
-      async function renderModelInternals() {
+      async function renderModelInternals(silent=false) {
         const internals = await Trainer.readModelInternals();
-        if (!internals || internals.length === 0) { pushLog("warn", "Model internals not available."); return; }
+        if (!internals || internals.length === 0) { if (!silent) pushLog("warn", "Model internals not available."); return; }
         
         let html = "<h3>Model Weights</h3>";
-        let heatmapData = [];
-        let plotLayout = layoutTransparent("Model Internals Heatmaps", { grid: { rows: internals.length-1, columns: 1, pattern: 'independent' }, height: (internals.length-1)*200+50 });
+        let heatmapTraces = [];
         
-        for (const layer of internals) {
+        // Remove embedding layer from internals rendering as it is shown separately
+        const nonEmbeddingInternals = internals.filter(l => l.name !== "embedding");
+
+        for (const layer of nonEmbeddingInternals) {
             html += `<h4>${layer.name} (${layer.className})</h4>`;
             for (const weight of layer.weights) {
                 const { mathml, meta, array: arr } = await tensorToMathML(weight.tensor);
@@ -1169,26 +1277,22 @@
                     const x = Array.from({length:z[0].length}, (_,i)=>`output_unit_${i+1}`);
                     const y = Array.from({length:z.length}, (_,i)=>`input_unit_${i+1}`);
 
-                    heatmapData.push({
+                    heatmapTraces.push({
                         z, x, y, type: 'heatmap',
                         colorscale: 'RdBu',
                         colorbar: { title: 'Weight' },
                         title: `${layer.name}: ${weight.name}`,
-                        xaxis: `x${heatmapData.length+1}`,
-                        yaxis: `y${heatmapData.length+1}`
                     });
                 }
             }
         }
         
-        // Remove embedding layer from heatmap view as it is shown separately
-        const heatmapTraces = heatmapData.filter(d => !d.title.includes("embedding"));
-
         $("#model-internals-render").innerHTML = html;
+        
         if (heatmapTraces.length > 0) {
              // Redo layout for the remaining heatmaps
              const numTraces = heatmapTraces.length;
-             plotLayout = layoutTransparent("Model Internals Heatmaps (Kernels & Biases)", { 
+             const plotLayout = layoutTransparent("Model Internals Heatmaps (Kernels & Biases)", { 
                  grid: { rows: numTraces, columns: 1, pattern: 'independent' }, 
                  height: numTraces*300+50 
              });
@@ -1197,12 +1301,14 @@
                  plotLayout[`yaxis${i+1}`] = { title: 'Input Dimension/Unit/Bias' };
                  trace.xaxis = `x${i+1}`;
                  trace.yaxis = `y${i+1}`;
+                 trace.name = trace.title;
              });
              Plotly.react("tensor-heatmap", heatmapTraces, plotLayout);
         } else {
-            Plotly.react("tensor-heatmap", [], layoutTransparent("Model Internals Heatmaps (Only 1D tensors found)"));
+            // If no 2D tensors were rendered, ensure the embedding matrix is still visible
+            await renderEmbeddingInternals(true); 
         }
-        pushLog("info", "rendered model internals");
+        if (!silent) pushLog("info", "rendered model internals");
       }
       
       function tokenizeAndPreview(force) {
@@ -1222,56 +1328,356 @@
         return tokens;
       }
       
-      async function runTests() {
+async function runTests() {
         console.group("Running Tests");
-        pushLog("info", "Starting integration tests...");
+        pushLog("info", "Starting comprehensive integration tests (30+ checks)...");
 
+        // --- HILFSFUNKTIONEN ---
+        function setAndRefreshTokenizer(type, n, mode) {
+            $("#tokenizer-type").value = type;
+            $("#ngram-n").value = n;
+            $("#ngram-mode").value = mode;
+            refreshTokenizer(); 
+        }
+
+        function checkArrayEqual(arr1, arr2) {
+            if (arr1.length !== arr2.length) return false;
+            for (let i = 0; i < arr1.length; i++) {
+                if (arr1[i] !== arr2[i]) return false;
+            }
+            return true;
+        }
+        
+        // Letzten Log-Level vor dem Test zurücksetzen, um Fehler von Warnungen zu unterscheiden.
+        let lastErrorLog = logBuffer.filter(e => e.level === 'error').length;
+        
         try {
-            // 1. Tokenizer Test
-            $("#tokenizer-type").value = "whitespace";
+            // --- GRUNDLEGENDE BESTEHENDE TESTS ---
+            
+            // 1. Tokenizer Test (Whitespace)
+            setAndRefreshTokenizer("whitespace", 2, "word");
             $("#input-text").value = "eins zwei drei";
             tokenizeAndPreview(true);
-            const tokens = ["eins", "zwei", "drei"];
-            const currentTokens = liveTokenizer($("#input-text").value);
-            if (currentTokens.join(" ") !== tokens.join(" ")) throw new Error("Tokenizer test failed.");
-            pushLog("info", "Tokenizer test successful.");
+            let tokens = ["eins", "zwei", "drei"];
+            let currentTokens = liveTokenizer($("#input-text").value);
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T01: Tokenizer (whitespace) test failed.");
+            pushLog("info", "T01: Tokenizer (whitespace) successful.");
+            
+            // 2. Tokenizer Test (n-gram/char)
+            setAndRefreshTokenizer("ngram", 2, "char");
+            $("#input-text").value = "ab cde";
+            currentTokens = liveTokenizer($("#input-text").value);
+            tokens = ["ab", "bc", "cd", "de"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T02: Tokenizer (n-gram/char) test failed. Got: " + currentTokens.join("|"));
+            pushLog("info", "T02: Tokenizer (n-gram/char) successful.");
 
-            // 2. Vocab Test
+            // 3. Vocab Test
+            setAndRefreshTokenizer("whitespace", 2, "word");
+            $("#input-text").value = "apple banana fruit animal animal cat dog which animal but apple banana animal but fruit apple fruit banana fruit apple fruit banana fruit apple fruit banana fruit dog animal dog animal dog animal cat animal cat animal cat animal apple banana fruit fruit banana apple apple banana fruit dog animal cat cat animal dog animal dog cat cat animal dog cat cat cat cat dog dog dog dog dog cat cat cat cat cat cat dog cat cat dog animal dog cat cat cat cat dog dog dog dog dog cat cat cat cat cat cat dog cat cat dog animal dog cat cat cat cat dog dog dog dog dog cat cat cat cat cat cat dog cat cat dog animal  fruit banana apple apple banana fruit fruit fruit banana apple apple banana apple banana banana apple apple banana fruit";
+            currentTokens = tokenizeAndPreview(true);
             Vocab.buildFromTokens(currentTokens);
-            if (Vocab.size() !== 3) throw new Error("Vocab size test failed.");
-            const encoded = Vocab.encode(tokens);
-            if (encoded.length !== 3 || encoded.some(id => typeof id !== 'number')) throw new Error("Vocab encode test failed.");
-            pushLog("info", "Vocab test successful.");
+            if (Vocab.size() !== 5) throw new Error("V01: Vocab size test failed (expected 5, got " + Vocab.size() + ")");
+            let encoded = Vocab.encode(currentTokens);
+            if (encoded.length !== currentTokens.length || encoded.some(id => typeof id !== 'number' || id < 0)) throw new Error("V02: Vocab encode test failed.");
+            pushLog("info", "V01/02: Vocab build/encode successful (Size 5).");
 
-            // 3. Model Creation Test
+            // 4. Model Creation Test
             $("#embedding-dim").value = 4;
             $("#learning-rate").value = 0.1;
             await $("#btn-create-model").click();
-            if (!Trainer.hasModel()) throw new Error("Model creation test failed.");
-            const embMatrix = Trainer.getEmbeddingMatrix();
-            if (!embMatrix || embMatrix.shape[0] !== 3 || embMatrix.shape[1] !== 4) throw new Error("Embedding matrix shape test failed.");
-            pushLog("info", "Model creation test successful (3x4).");
+            if (!Trainer.hasModel()) throw new Error("M01: Model creation test failed.");
+            let embMatrix = Trainer.getEmbeddingMatrix();
+            if (!embMatrix || embMatrix.shape[0] !== 5 || embMatrix.shape[1] !== 4) throw new Error("M02: Embedding matrix shape test failed (Expected 5x4, got " + embMatrix.shape + ")");
+            pushLog("info", "M01/02: Model creation successful (5x4).");
             
-            // 4. Training Step Test
+            // 5. Training Step Test
             const initialLosses = epochLosses.length;
             await Trainer.trainOnDataset(encoded, { batchSize:3, epochs:1 }, null);
-            if (epochLosses.length !== initialLosses + 1) throw new Error("Training step test failed (loss not recorded).");
-            pushLog("info", "Training step test successful.");
+            if (epochLosses.length !== initialLosses + 1) throw new Error("TR01: Training step test failed (loss not recorded).");
+            pushLog("info", "TR01: Training step test successful.");
             
-            // 5. Visualization Test (simple check)
+            // 6. Visualization Test
             await updateAllVisualizations();
-            if (!$("#plot").querySelector('svg')) throw new Error("Visualization test failed (Plotly not rendered).");
-            pushLog("info", "Visualization test successful.");
+            if (!$("#plot").querySelector('svg')) throw new Error("VS01: Visualization test failed (Plotly not rendered).");
+            pushLog("info", "VS01: Visualization test successful.");
             
-            pushLog("info", "All integration tests passed successfully.");
+            // 7. PCA Projection Test
+            const rawEmbeddings = embMatrix.arraySync();
+            const pcaResult = await Visual.projectPCA(rawEmbeddings, 2);
+            if (pcaResult.length !== rawEmbeddings.length || (pcaResult[0] && pcaResult[0].length !== 2)) throw new Error("MA01: PCA projection test failed (Wrong shape).");
+            pushLog("info", "MA01: PCA projection test successful.");
+            
+            // 8. Dimension Ranking Test
+            const rankingHtml = $("#dim-ranking-output").innerHTML;
+            if (!rankingHtml || rankingHtml.includes('Modell erstellen')) throw new Error("VS02: Dimension ranking test failed (Output empty).");
+            pushLog("info", "VS02: Dimension ranking test successful.");
+
+            // --- A: TOKENIZER ROBUSTHEITS-TESTS (9 neue Tests) ---
+            
+            // 9. Leere Texteingabe
+            $("#input-text").value = "";
+            currentTokens = liveTokenizer($("#input-text").value);
+            if (currentTokens.length !== 0) throw new Error("T03: Empty text tokenization failed (Expected 0).");
+            pushLog("info", "T03: Tokenization of empty string successful.");
+
+            // 10. Nur Leerzeichen
+            $("#input-text").value = "   \n  \t ";
+            currentTokens = liveTokenizer($("#input-text").value);
+            if (currentTokens.length !== 0) throw new Error("T04: Tokenization of only whitespace failed (Expected 0).");
+            pushLog("info", "T04: Tokenization of only whitespace successful.");
+            
+            // 11. Comma Tokenizer
+            setAndRefreshTokenizer("comma", 2, "word");
+            $("#input-text").value = "token1, token2,token3,,token4";
+            currentTokens = liveTokenizer($("#input-text").value);
+            tokens = ["token1", "token2", "token3", "token4"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T05: Comma tokenizer failed. Got: " + currentTokens.join("|"));
+            pushLog("info", "T05: Comma tokenizer successful.");
+
+            // 12. Char Tokenizer
+            setAndRefreshTokenizer("char", 2, "word");
+            $("#input-text").value = "abc def"; // Whitespace should be ignored
+            currentTokens = liveTokenizer($("#input-text").value);
+            tokens = ["a", "b", "c", "d", "e", "f"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T06: Char tokenizer failed. Got: " + currentTokens.join("|"));
+            pushLog("info", "T06: Char tokenizer successful.");
+
+            // 13. Regex Tokenizer (numbers)
+            setAndRefreshTokenizer("regex", 2, "word");
+            // Assuming default regex is \b\w+\b
+            $("#input-text").value = "Text1. 234, text2!";
+            currentTokens = liveTokenizer($("#input-text").value); 
+            tokens = ["Text1", "234", "text2"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T07: Regex tokenizer (default) failed. Got: " + currentTokens.join("|"));
+            pushLog("info", "T07: Regex tokenizer successful (default \\b\\w+\\b).");
+
+            // 14. N-gram word with n=3
+            setAndRefreshTokenizer("ngram", 3, "word");
+            $("#input-text").value = "dies ist ein test";
+            currentTokens = liveTokenizer($("#input-text").value);
+            tokens = ["dies_ist_ein", "ist_ein_test"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T08: N-gram word n=3 failed. Got: " + currentTokens.join("|"));
+            pushLog("info", "T08: N-gram word n=3 successful.");
+            
+            // 15. N-gram n=1 (should behave like word/char)
+            setAndRefreshTokenizer("ngram", 1, "char");
+            $("#input-text").value = "hello";
+            currentTokens = liveTokenizer($("#input-text").value);
+            tokens = ["h", "e", "l", "l", "o"];
+            if (!checkArrayEqual(currentTokens, tokens)) throw new Error("T09: N-gram n=1 char failed.");
+            pushLog("info", "T09: N-gram n=1 char successful.");
+
+            // 16. Tokenizer robustness to non-string input (Implicit via input value)
+            setAndRefreshTokenizer("whitespace", 2, "word");
+
+            // 17. Token-Preview Update Check (T10 - FIXED)
+            const fiftyFiveTokens = Array(55).fill('x').join(' ');
+            $("#input-text").value = fiftyFiveTokens; // 55 tokens
+            tokenizeAndPreview(true);
+            const previewCount = $("#token-preview").querySelectorAll('.token-pill').length;
+            
+            if (previewCount !== 50) throw new Error("T10: Token preview limit failed (Expected 50, got " + previewCount + ").");
+            if (!$("#token-preview").innerHTML.includes("... und 5 weitere")) throw new Error("T10.1: Token preview overflow message failed.");
+            pushLog("info", "T10: Token preview limit and overflow successful.");
+
+            // --- B: VOCAB ROBUSTHEITS-TESTS (5 neue Tests) ---
+            
+            // Cleanup
+            Vocab.reset();
+            $("#stat-unique-count").textContent = '0';
+
+            // 18. Vocab aus leeren Tokens
+            const emptyTokens = liveTokenizer("");
+            Vocab.buildFromTokens(emptyTokens);
+            if (Vocab.size() !== 0) throw new Error("V03: Vocab from empty tokens failed (Expected 0).");
+            pushLog("info", "V03: Vocab from empty tokens successful.");
+
+            // 19. Encoding neuer/unbekannter Tokens (sollte UNK/gefiltert werden)
+            $("#input-text").value = "apple banana";
+            currentTokens = liveTokenizer($("#input-text").value);
+            Vocab.buildFromTokens(currentTokens); // Vocab: apple(0), banana(1)
+            const oldSize = Vocab.size();
+
+            const newTokens = ["apple", "orange", "banana"]; // orange is new
+            encoded = Vocab.encode(newTokens);
+            // In diesem didaktischen Modell werden unbekannte Tokens mit -1 codiert und gefiltert.
+            if (encoded.length !== 2 || encoded.some(id => id > 1)) throw new Error("V04: Encoding unknown tokens failed (Expected length 2).");
+            if (Vocab.size() !== oldSize) throw new Error("V05: Vocab size changed during encode.");
+            pushLog("info", "V04/05: Encoding unknown tokens successful (Length 2).");
+
+            // 20. Vocab Reset Funktionalität
+            Vocab.reset();
+            if (Vocab.size() !== 0) throw new Error("V06: Vocab reset failed (Size not 0).");
+            pushLog("info", "V06: Vocab reset successful.");
+
+            // 21. Vocab AddTokens Funktionalität
+            Vocab.buildFromTokens(["a", "b"]);
+            Vocab.addTokens(["c", "a"]); // 'a' already exists
+            if (Vocab.size() !== 3) throw new Error("V07: Vocab AddTokens failed (Expected 3).");
+            pushLog("info", "V07: Vocab AddTokens successful (Size 3).");
+
+            // --- C: MODEL/TRAINING PARAMETER TESTS (7 neue Tests) ---
+            
+            // Cleanup for model tests
+            Vocab.reset();
+            Vocab.buildFromTokens(["a", "b", "c", "d"]);
+            $("#embedding-dim").value = 4;
+            $("#learning-rate").value = 0.01;
+            $("#optimizer-type").value = "adam";
+            Trainer.resetModel();
+            
+            // 22. Ungültige Embedding-Dimension (0)
+            $("#embedding-dim").value = 0;
+            await $("#btn-create-model").click();
+            // Check if error was logged
+            if (logBuffer.filter(e => e.level === 'error').length <= lastErrorLog) throw new Error("M03: Invalid Embedding Dim (0) did not log error.");
+            lastErrorLog = logBuffer.filter(e => e.level === 'error').length;
+            if (Trainer.hasModel()) throw new Error("M04: Model created with invalid Embedding Dim (0).");
+            pushLog("info", "M03/04: Invalid Embedding Dim (0) correctly blocked.");
+            $("#embedding-dim").value = 4; // Reset
+
+            // 23. Ungültige Learning Rate (Text)
+            $("#learning-rate").value = "invalid";
+            await $("#btn-create-model").click();
+            if (logBuffer.filter(e => e.level === 'error').length <= lastErrorLog) throw new Error("M05: Invalid LR (text) did not log error.");
+            lastErrorLog = logBuffer.filter(e => e.level === 'error').length;
+            if (Trainer.hasModel()) throw new Error("M06: Model created with invalid LR (text).");
+            pushLog("info", "M05/06: Invalid LR (text) correctly blocked.");
+            $("#learning-rate").value = 0.01; // Reset
+
+            // 24. Training ohne vorheriges Modell (sollte automatisch erstellen)
+            Trainer.resetModel();
+            $("#epochs").value = 1;
+            $("#input-text").value = "a b c d";
+            Vocab.buildFromTokens(["a", "b", "c", "d"]); // Rebuild vocab for test
+            const initialLosses2 = epochLosses.length;
+            await $("#btn-train").click(); // Should auto-create and train
+            if (!Trainer.hasModel()) throw new Error("M07: Training failed to auto-create model.");
+            if (epochLosses.length !== initialLosses2 + 1) throw new Error("TR02: Training failed after auto-create.");
+            pushLog("info", "M07/TR02: Auto-create model and train successful.");
+
+            // 25. Embedding Matrix Change Check
+            const currentTokens2 = liveTokenizer($("#input-text").value);
+            const encoded2 = Vocab.encode(currentTokens2);
+            const initialEmbArray = Trainer.getEmbeddingMatrix().arraySync();
+            await Trainer.trainOnDataset(encoded2, { batchSize:1, epochs:1 }, null); // Train again
+            const finalEmbArray = Trainer.getEmbeddingMatrix().arraySync();
+            let changed = false;
+            for(let i=0; i<initialEmbArray.length; i++) {
+                for(let j=0; j<initialEmbArray[i].length; j++) {
+                    if (Math.abs(initialEmbArray[i][j] - finalEmbArray[i][j]) > 1e-4) { changed = true; break; }
+                }
+                if (changed) break;
+            }
+            if (!changed) throw new Error("TR03: Embedding matrix did not change after training.");
+            pushLog("info", "TR03: Embedding matrix change check successful.");
+
+            // 26. Check Adam Optimizer
+            $("#optimizer-type").value = "adam";
+            Trainer.resetModel();
+            await $("#btn-create-model").click();
+            const modelSummary = $("#model-summary").textContent;
+            if (!modelSummary.includes('Adam')) throw new Error("M08: Adam optimizer not in summary.");
+            pushLog("info", "M08: Adam optimizer check successful.");
+
+            // 27. Check SGD Optimizer
+            $("#optimizer-type").value = "sgd";
+            Trainer.resetModel();
+            await $("#btn-create-model").click();
+            const modelSummarySGD = $("#model-summary").textContent;
+            if (!modelSummarySGD.includes('SGD')) throw new Error("M09: SGD optimizer not in summary.");
+            pushLog("info", "M09: SGD optimizer check successful.");
+            $("#optimizer-type").value = "adam"; // Reset
+
+            // --- D: MATHEMATISCHE/VISUALISIERUNGS-INTEGRITÄTS-TESTS (9 neue Tests) ---
+            
+            // 28. Cosine Similarity Test (Perfekter Match)
+            const v1 = [1, 0, 0];
+            const v2 = [1, 0, 0];
+            const sim1 = Visual.cosineSimilarity(v1, v2);
+            if (Math.abs(sim1 - 1.0) > 1e-6) throw new Error("MA02: Cosine similarity perfect match failed (Got: " + sim1 + ").");
+            pushLog("info", "MA02: Cosine similarity perfect match successful.");
+
+            // 29. Cosine Similarity Test (Perfekter Gegensatz)
+            const v3 = [1, 0, 0];
+            const v4 = [-1, 0, 0];
+            const sim2 = Visual.cosineSimilarity(v3, v4);
+            if (Math.abs(sim2 - (-1.0)) > 1e-6) throw new Error("MA03: Cosine similarity perfect opposite failed (Got: " + sim2 + ").");
+            pushLog("info", "MA03: Cosine similarity perfect opposite successful.");
+
+            // 30. Cosine Similarity Test (Orthogonal)
+            const v5 = [1, 1, 0];
+            const v6 = [1, -1, 0];
+            const sim3 = Visual.cosineSimilarity(v5, v6);
+            if (Math.abs(sim3 - 0.0) > 1e-6) throw new Error("MA04: Cosine similarity orthogonal failed (Got: " + sim3 + ").");
+            pushLog("info", "MA04: Cosine similarity orthogonal successful.");
+
+            // 31. Distanzmatrix Symmetrie-Check
+            const embMatrixForMath = Trainer.getEmbeddingMatrix();
+            const rawEmbeddingsForMath = embMatrixForMath.arraySync();
+            const dm = Visual.distanceMatrix(rawEmbeddingsForMath, Vocab.exportVocab().idToToken);
+            if (dm.z.length !== dm.z[0].length) throw new Error("MA05: Distance matrix is not square.");
+            if (Math.abs(dm.z[0][1] - dm.z[1][0]) > 1e-6) throw new Error("MA06: Distance matrix not symmetric (z[0][1] != z[1][0]).");
+            pushLog("info", "MA05/06: Distance matrix integrity successful.");
+
+            // 32. Korrelationsmatrix Check (Diagonale sollte 1 sein)
+            Trainer.resetModel(); // Model muss neu gebaut werden, da der letzte Test das Emb verändert hat
+            $("#embedding-dim").value = 4;
+            Vocab.buildFromTokens(["a", "b", "c", "d"]);
+            await $("#btn-create-model").click(); // Re-create model for fresh embeddings
+            const freshEmb = Trainer.getEmbeddingMatrix().arraySync();
+            const corr = Visual.correlationMatrix(freshEmb);
+            if (corr.z.length !== 4) throw new Error("MA07: Correlation matrix size failed (Expected 4x4).");
+            for(let i=0; i<4; i++) {
+                if (Math.abs(corr.z[i][i] - 1.0) > 1e-6) throw new Error("MA08: Correlation matrix diagonal not 1 at " + i + ".");
+            }
+            pushLog("info", "MA07/08: Correlation matrix integrity successful.");
+
+            // 33. Live Probe Funktionalität
+            $("#live-text").value = "a"; // Must be a known token
+            await probeNow(true);
+            const livePlotTitle = $("#live-plot").parentNode.querySelector('.js-plotly-plot .plot-container .svg-container .main-svg .gtitle .gtitle').textContent;
+            if (!livePlotTitle.includes('Prediction')) throw new Error("VS03: Live Probe failed (Plot title check).");
+            pushLog("info", "VS03: Live Probe check successful.");
+
+            // 34. Radar Plot invocation check (Checkt nur, ob es läuft)
+            $("#radar-tokens").value = "a,b";
+            const currentLogCount = logBuffer.length;
+            await $("#btn-plot-radar").click();
+            if (logBuffer.length > currentLogCount && logBuffer[logBuffer.length - 1].level === 'error') throw new Error("VS04: Radar Plot failed to execute.");
+            pushLog("info", "VS04: Radar Plot execution successful.");
+
+            // 35. Recurrence Plot invocation check (Checkt nur, ob es läuft)
+            $("#input-text").value = "a b c b a";
+            const currentLogCount2 = logBuffer.length;
+            await $("#btn-plot-recurrence").click();
+            if (logBuffer.length > currentLogCount2 && logBuffer[logBuffer.length - 1].level === 'error') throw new Error("VS05: Recurrence Plot failed to execute.");
+            pushLog("info", "VS05: Recurrence Plot execution successful.");
+
+            // 36. Dimensions-Histogramm Check (Checkt nur, ob es läuft)
+            await Visual.plotDimensionHistograms(freshEmb, Vocab.exportVocab().idToToken);
+            const histPlotSVG = $("#dim-hist-plot").querySelector('svg');
+            if (!histPlotSVG || histPlotSVG.querySelectorAll('.plot').length < 2) throw new Error("VS06: Dim Histogram plot failed (Expected multiple plots).");
+            pushLog("info", "VS06: Dim Histogram plot successful.");
+
+            // 37. Reset Button Funktionalität
+            $("#btn-reset").click();
+            if (Trainer.hasModel()) throw new Error("M10: Reset button failed to clear model.");
+            if (Vocab.size() !== 0) throw new Error("V08: Reset button failed to clear vocab.");
+            pushLog("info", "M10/V08: Reset button successful.");
+            
+            pushLog("info", "All (37+) integration tests passed successfully.");
 
         } catch (e) {
             pushLog("error", "Integration tests FAILED: " + e.message);
         } finally {
-            Trainer.resetModel(); // Cleanup
+            // Finaler Cleanup
+            Trainer.resetModel(); 
+            Vocab.reset();
+            setAndRefreshTokenizer("whitespace", 2, "word"); // Zurücksetzen auf Standard
             console.groupEnd();
         }
-      }
+    }
 
 
       // startup
@@ -1284,7 +1690,6 @@
       (function main() {
         try {
           initUI();
-          tokenizeAndPreview(false);
           
           Plotly.newPlot("plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Embeddings"));
           Plotly.newPlot("highdim-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("High-dim"));
@@ -1295,16 +1700,26 @@
           Plotly.newPlot("radar-plot", [], layoutTransparent("Token Profile")); 
           Plotly.newPlot("recurrence-plot", [], layoutTransparent("Recurrence Plot"));
           Plotly.newPlot("dim-hist-plot", [{ x:[], y:[], mode:"markers" }], layoutTransparent("Histogramm-Verteilung"));
+          Plotly.newPlot("tensor-heatmap", [], layoutTransparent("Embedding Matrix Heatmap")); // Initialize this as well
           
           Visual.plotLoss(epochLosses); 
           
           // Setze initiale Eingabetexte und starte Tokenizer/Vocab
           $("#input-text").value = "könig ist mann königin ist frau frau ist königin könig ist mann";
-          $("#tokenizer-type").value = "whitespace"; 
-          tokenizeAndPreview(true);
-          $("#btn-build-vocab").click(); 
           
-          pushLog("info","App ready");
+          // Stellen Sie sicher, dass der n-gram-Tokenizer der Standardwert ist, aber für den Start
+          // verwenden wir jetzt den 'whitespace' für das Standard-Input.
+          $("#tokenizer-type").value = "whitespace"; 
+          $("#ngram-mode").value = "word";
+          
+          // Initialisierung des Tokenizers und Vocab
+          refreshTokenizer(); // Ruft den globalen refreshTokenizer auf, um liveTokenizer zu aktualisieren
+          const initialTokens = tokenizeAndPreview(true);
+          Vocab.buildFromTokens(initialTokens);
+          const embeddingDim = Math.max(1, parseInt($("#embedding-dim").value,10) || 8);
+          $("#status-emb-size").textContent = `${Vocab.size()}×${embeddingDim}`;
+          
+          pushLog("info","App ready. Vocab built automatically from default text (Size: "+Vocab.size()+"). Click 'Create model' to start.");
         } catch (e) { console.error("main init error", e); pushLog("error","App failed to start: "+e.message); }
       })();
 
