@@ -111,7 +111,7 @@
             </div>
             <div style="flex:1;">
                 <label for="epochs">Epochs</label>
-                <input id="epochs" type="number" min="1" value="100" />
+                <input id="epochs" type="number" min="1" value="1000" />
             </div>
             <div style="display:flex;gap:8px;">
                 <button id="btn-create-model">Create model</button>
@@ -145,7 +145,7 @@
           <label for="optimizer-type">Optimizer</label>
           <select id="optimizer-type"><option value="sgd">SGD</option><option value="adam" selected>Adam</option></select>
           <label for="batch-size">Batch size</label>
-          <input id="batch-size" type="number" min="1" value="8" />
+          <input id="batch-size" type="number" min="1" value="1000" />
           <div style="margin-top:8px;">
             <label>Model summary</label>
             <pre id="model-summary" style="font-family:var(--mono);font-size:12px;white-space:pre-wrap;max-height:140px;overflow:auto;"></pre>
